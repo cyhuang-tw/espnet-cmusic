@@ -148,3 +148,30 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
           --file_modality_type ${tgt_dir}/${dset}/dialogue,dialogue,dialogue_json
     done
 fi
+
+if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
+    log "Convert SIFT-50M dataset"
+    dir=dump/raw_text_dialogue_sift50m
+    python local/data_prep_sift50m.py \
+      --output_dir ${dir} --root_dir ${sift_dir} \
+      --vctk_dir ${vctk_dir} --mls_dir ${mls_dir} --cv_dir ${cv_dir}
+
+    # Create dummy user_prompt_list and assistant_prompt_list
+    mkdir -p tmp_
+    touch tmp_/prompt.scp
+    # Audio-Text dialogues
+    tgt_dir=dump/raw_audio_text_dialogue_sift50m
+    for dset in closed_ended_acoustic_level closed_ended_comparison closed_ended_content_level closed_ended_word_align open_ended; do
+      cp ${dir}/${dset}/data/dialogue.1 ${dir}/${dset}/dialogue
+
+      bash scripts/utils/speechlm_text_dialogue_to_speech_dialogue.sh \
+        --input_dir ${dir}/${dset} \
+        --output_dir ${tgt_dir}/${dset} \
+        --task audio_text_dialogue \
+        --ready_audio_list ${dir}/${dset}/wav.scp \
+        --user_prompt_list tmp_/prompt.scp \
+        --assistant_prompt_list tmp_/prompt.scp
+    done
+    rm -rf tmp_/prompt.scp
+    rmdir --ignore-fail-on-non-empty tmp_ || true
+fi
