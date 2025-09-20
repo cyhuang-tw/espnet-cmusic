@@ -25,6 +25,10 @@ TULU3=data/local/tulu3
 OpenAudioBench=data/local/openaudiobench
 OLMO2_SFT=/work/hdd/bbjs/jtian1/tools/olmo2_dpo
 OLMO2_DPO=data/local/olmo2_dpo
+sift_dir=
+vctk_dir=
+mls_dir=
+cv_dir=
 
 user_prompt_list=dump/raw_codec_ssl_tts_yodas/train_yodas/index_files/wav.scp       # prompt to generate user speech
 assistant_prompt_list=data/assistant_prompt.scp                                     # prompt to generate assistant speech
