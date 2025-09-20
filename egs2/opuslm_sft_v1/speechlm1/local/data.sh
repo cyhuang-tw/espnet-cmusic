@@ -9,7 +9,7 @@
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
-set -u
+# set -u
 set -o pipefail
 
 log() {
@@ -36,8 +36,10 @@ user_prompt_list=$assistant_prompt_list
 
 . utils/parse_options.sh
 
+set +u
 . ./db.sh
 . ./path.sh
+set -u
 
 if ! command -v huggingface-cli &> /dev/null; then
     echo "Error: huggingface-cli command not found. Please install it first." >&2
