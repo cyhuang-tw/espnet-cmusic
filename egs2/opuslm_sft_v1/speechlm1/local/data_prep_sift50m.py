@@ -5,6 +5,7 @@
 
 import argparse
 import json
+import uuid
 
 from pathlib import Path
 from espnet2.speechlm.dialogue.dialogue_format import Dialogue, DialogueDataset
@@ -119,7 +120,8 @@ def main(output_dir: Path, root_dir: Path, vctk_dir: Path, mls_dir: Path, cv_dir
                 audio = get_path(audio, source, audio_dir).as_posix()
                 if audio is None:
                     continue
-                data_key = f"{subset.replace('/', '_')}:{idx}"
+                random_uuid = uuid.uuid4()
+                data_key = f"{subset.replace('/', '_')}:{idx}:{random_uuid}"
                 data_dict[data_key] = {
                     "task": task,
                     "source": source,
