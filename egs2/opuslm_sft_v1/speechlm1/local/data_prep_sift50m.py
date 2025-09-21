@@ -99,7 +99,7 @@ def main(output_dir: Path, root_dir: Path, vctk_dir: Path, mls_dir: Path, cv_dir
         files = list(curr_dir.iterdir())
 
         for file in files:
-            writer_dir = output_dir / f"{subset.replace("/", "_")}_{file.stem}"
+            writer_dir = output_dir / f"{subset.replace('/', '_')}_{file.stem}"
             writer_dir.mkdir(exist_ok=True, parents=True)
             dataset = DialogueDataset(task="text_dialogue")
             data_dict = {}
