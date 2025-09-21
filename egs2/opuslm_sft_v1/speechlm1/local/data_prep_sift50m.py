@@ -98,13 +98,13 @@ def main(output_dir: Path, root_dir: Path, vctk_dir: Path, mls_dir: Path, cv_dir
             raise FileNotFoundError(f"{curr_dir} does not exist.")
         files = list(curr_dir.iterdir())
 
-        writer_dir = output_dir / subset.replace("/", "_")
-        writer_dir.mkdir(exist_ok=True, parents=True)
-        dataset = DialogueDataset(task="text_dialogue")
-        data_dict = {}
-        wav_writer = (writer_dir / "wav.scp").open(mode="w")
-
         for file in files:
+            writer_dir = output_dir / f"{subset.replace("/", "_")}_{file.stem}"
+            writer_dir.mkdir(exist_ok=True, parents=True)
+            dataset = DialogueDataset(task="text_dialogue")
+            data_dict = {}
+            wav_writer = (writer_dir / "wav.scp").open(mode="w")
+
             lines = file.open(mode="r").readlines()
             metadata = [json.loads(line) for line in lines]
             for data in metadata:
@@ -117,9 +117,10 @@ def main(output_dir: Path, root_dir: Path, vctk_dir: Path, mls_dir: Path, cv_dir
                 assert question is not None
                 assert answer is not None
                 assert audio is not None
-                audio = get_path(audio, source, audio_dir).as_posix()
+                audio = get_path(audio, source, audio_dir)
                 if audio is None:
                     continue
+                audio = audio.as_posix()
                 random_uuid = uuid.uuid4()
                 data_key = f"{subset.replace('/', '_')}:{idx}:{random_uuid}"
                 data_dict[data_key] = {
