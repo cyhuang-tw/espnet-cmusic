@@ -132,7 +132,7 @@ def main():
         logging.info(f"Processing subset: {subset} with {len(files)} files")
 
         for file in files:
-            if not file.is_file() or file.suffix != '.json':
+            if not file.is_file() or file.suffix != '.jsonl':
                 continue
                 
             logging.info(f"Processing file: {file}")
