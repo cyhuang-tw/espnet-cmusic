@@ -167,7 +167,9 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
     touch tmp_/prompt.scp
     # Audio-Text dialogues
     tgt_dir=dump/raw_audio_text_dialogue_sift50m
-    for dset in closed_ended_acoustic_level closed_ended_comparison closed_ended_content_level closed_ended_word_align open_ended; do
+    # for dset in closed_ended_acoustic_level closed_ended_comparison closed_ended_content_level closed_ended_word_align open_ended; do
+    for dset in ${dir}/*; do
+      dset=$(basename ${dset})
       cp ${dir}/${dset}/data/dialogue.1 ${dir}/${dset}/dialogue
 
       bash scripts/utils/speechlm_text_dialogue_to_speech_dialogue.sh \
