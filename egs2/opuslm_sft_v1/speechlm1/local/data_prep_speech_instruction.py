@@ -39,12 +39,6 @@ def get_parser():
         type=Path,
         help="Path to CommonVoice corpus"
     )
-    parser.add_argument(
-        "--split_ratio",
-        type=float,
-        default=0.01,
-        help="Ratio for validation split (default: 0.01)"
-    )
 
     return parser
 
@@ -105,7 +99,6 @@ def main():
     vctk_dir = args.vctk_dir
     mls_dir = args.mls_dir
     cv_dir = args.cv_dir
-    split_ratio = args.split_ratio
 
     logging.basicConfig(level=logging.INFO)
     
@@ -115,9 +108,8 @@ def main():
         "common_voice_en": cv_dir,
     }
 
-    # Create dataset objects for speech instruction task
-    train_dataset = DialogueDataset(task="audio_text_dialogue")
-    valid_dataset = DialogueDataset(task="audio_text_dialogue")
+    # Create single dataset object for speech instruction task
+    dataset = DialogueDataset(task="audio_text_dialogue")
 
     subsets = [
         "closed_ended/acoustic_level",
@@ -129,7 +121,6 @@ def main():
     lang = "en"  # We only use English data
 
     total_examples = 0
-    valid_examples = 0
 
     for subset in subsets:
         curr_dir = root_dir / subset / lang
@@ -152,7 +143,6 @@ def main():
             for data in metadata:
                 try:
                     idx = data["id"]
-                    task = data["task"]
                     source = data["data_source"]
                     question = data["messages"][0]["content"][1]["text"]
                     audio = data["messages"][0]["content"][0]["audio_path"]
@@ -187,31 +177,21 @@ def main():
                     # Assistant provides text response (as target)
                     dialogue.add_segment("assistant", "text_bpe", True, answer)
                     
-                    # Decide train/valid split
+                    # Add to dataset
+                    dataset.add_dialogue(dialogue_id, dialogue)
                     total_examples += 1
-                    if total_examples % int(1 / split_ratio) == 0:
-                        valid_dataset.add_dialogue(dialogue_id, dialogue)
-                        valid_examples += 1
-                    else:
-                        train_dataset.add_dialogue(dialogue_id, dialogue)
                         
                 except Exception as e:
                     logging.error(f"Error processing example {idx}: {e}")
                     continue
 
-    # Save datasets
+    # Save dataset
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    train_dir = output_dir / "train"
-    valid_dir = output_dir / "valid"
+    logging.info(f"Saving {len(dataset.dialogues)} examples to {output_dir}")
+    dataset.dump_dataset(output_dir)
     
-    logging.info(f"Saving {len(train_dataset.dialogues)} training examples to {train_dir}")
-    train_dataset.dump_dataset(train_dir)
-    
-    logging.info(f"Saving {len(valid_dataset.dialogues)} validation examples to {valid_dir}")
-    valid_dataset.dump_dataset(valid_dir)
-    
-    logging.info(f"Data preparation complete. Total: {total_examples}, Train: {len(train_dataset.dialogues)}, Valid: {len(valid_dataset.dialogues)}")
+    logging.info(f"Data preparation complete. Total: {total_examples} examples")
 
 
 if __name__ == "__main__":

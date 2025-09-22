@@ -6,8 +6,9 @@ set -u
 set -o pipefail
 
 # Data configuration for speech instruction tuning
-train_jsons="dump/raw_audio_text_dialogue_speech_instruction/train/data.json"
-valid_jsons="dump/raw_audio_text_dialogue_speech_instruction/valid/data.json"
+# Note: You should specify separate train/valid datasets when calling this script
+train_jsons="dump/raw_audio_text_dialogue_speech_instruction/data.json"
+valid_jsons="dump/raw_audio_text_dialogue_speech_instruction/data.json"
 
 # Training and inference configuration
 train_config=conf/train_speech_instruction.yaml

@@ -212,20 +212,17 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
       --root_dir ${sift_dir} \
       --vctk_dir ${vctk_dir} \
       --mls_dir ${mls_dir} \
-      --cv_dir ${cv_dir} \
-      --split_ratio 0.00
+      --cv_dir ${cv_dir}
     
-    # Generate data.json files for train and valid sets
-    for dset in train valid; do
-        if [ -d "${dir}/${dset}" ] && [ -f "${dir}/${dset}/data/dialogue.1" ]; then
-            cp ${dir}/${dset}/data/dialogue.1 ${dir}/${dset}/dialogue
-            python3 pyscripts/utils/make_speechlm_json.py \
-              --task audio_text_dialogue \
-              --output_json ${dir}/${dset}/data.json \
-              --file_modality_type ${dir}/${dset}/dialogue,dialogue,dialogue_json
-            log "Generated ${dir}/${dset}/data.json with $(wc -l < ${dir}/${dset}/dialogue) examples"
-        else
-            log "Warning: ${dir}/${dset} directory or dialogue file not found"
-        fi
-    done
+    # Generate data.json file
+    if [ -d "${dir}" ] && [ -f "${dir}/data/dialogue.1" ]; then
+        cp ${dir}/data/dialogue.1 ${dir}/dialogue
+        python3 pyscripts/utils/make_speechlm_json.py \
+          --task audio_text_dialogue \
+          --output_json ${dir}/data.json \
+          --file_modality_type ${dir}/dialogue,dialogue,dialogue_json
+        log "Generated ${dir}/data.json with $(wc -l < ${dir}/dialogue) examples"
+    else
+        log "Warning: ${dir} directory or dialogue file not found"
+    fi
 fi
