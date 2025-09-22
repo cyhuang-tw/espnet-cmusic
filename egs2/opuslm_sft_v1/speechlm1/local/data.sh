@@ -183,3 +183,49 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
     rm -rf tmp_/prompt.scp
     rmdir --ignore-fail-on-non-empty tmp_ || true
 fi
+
+if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
+    log "Convert SIFT-50M dataset for Speech Instruction Tuning"
+    
+    # Check required directories
+    if [ -z "${sift_dir}" ] || [ ! -d "${sift_dir}" ]; then
+        log "Error: sift_dir is not set or does not exist. Please set --sift_dir"
+        exit 1
+    fi
+    if [ -z "${vctk_dir}" ] || [ ! -d "${vctk_dir}" ]; then
+        log "Error: vctk_dir is not set or does not exist. Please set --vctk_dir"
+        exit 1
+    fi
+    if [ -z "${mls_dir}" ] || [ ! -d "${mls_dir}" ]; then
+        log "Error: mls_dir is not set or does not exist. Please set --mls_dir"
+        exit 1
+    fi
+    if [ -z "${cv_dir}" ] || [ ! -d "${cv_dir}" ]; then
+        log "Error: cv_dir is not set or does not exist. Please set --cv_dir"
+        exit 1
+    fi
+    
+    # Prepare speech instruction data
+    dir=dump/raw_audio_text_dialogue_speech_instruction
+    python local/data_prep_speech_instruction.py \
+      --output_dir ${dir} \
+      --root_dir ${sift_dir} \
+      --vctk_dir ${vctk_dir} \
+      --mls_dir ${mls_dir} \
+      --cv_dir ${cv_dir} \
+      --split_ratio 0.00
+    
+    # Generate data.json files for train and valid sets
+    for dset in train valid; do
+        if [ -d "${dir}/${dset}" ] && [ -f "${dir}/${dset}/data/dialogue.1" ]; then
+            cp ${dir}/${dset}/data/dialogue.1 ${dir}/${dset}/dialogue
+            python3 pyscripts/utils/make_speechlm_json.py \
+              --task audio_text_dialogue \
+              --output_json ${dir}/${dset}/data.json \
+              --file_modality_type ${dir}/${dset}/dialogue,dialogue,dialogue_json
+            log "Generated ${dir}/${dset}/data.json with $(wc -l < ${dir}/${dset}/dialogue) examples"
+        else
+            log "Warning: ${dir}/${dset} directory or dialogue file not found"
+        fi
+    done
+fi

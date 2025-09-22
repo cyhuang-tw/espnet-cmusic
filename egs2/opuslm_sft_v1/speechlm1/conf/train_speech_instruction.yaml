@@ -1,0 +1,45 @@
+# Model
+transformer: huggingface
+transformer_conf:
+    hf_model_tag: allenai/OLMo-2-1124-7B
+    activation_checkpointing: true
+    n_ctx: 32768  # Increased context length for instruction following
+    
+corelm: ar_delay
+corelm_conf:
+    share_emb: false
+
+# Loss configuration optimized for instruction tuning
+modality_weights: {
+    "codec": 0.5,           # Speech input (condition)
+    "text_bpe": 1.0,        # Text instructions and responses
+    "special_token": 1.0,   # Role and task tokens
+}
+loss_region: target  # Only compute loss on assistant responses
+loss_type: sum
+
+# General Dataloader configuration
+batch_type: numel
+batch_bins: 8000  # Reduced for longer sequences
+max_epoch: 3
+num_workers: 6
+drop_last_iter: false
+log_interval: 100
+
+# Data preprocessing for instruction tuning
+codec_token_per_frame: 9
+codec_token_in_use: 9
+speaker_prompt_length: 500
+
+# Spec augmentation for speech input
+asr_apply_time_mask: true
+asr_time_mask_config:
+    mask_width_ratio_range:
+    - 0.
+    - 0.05
+    num_mask: 10
+
+# DeepSpeed configuration
+use_deepspeed: true
+deepspeed_config: conf/deepspeed_ddp_zero2_olmo.json
+deepspeed_step_sync: false
