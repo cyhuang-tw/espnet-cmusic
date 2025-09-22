@@ -70,9 +70,21 @@ def get_vctk_path(filename: str, audio_dir: Path) -> Path:
 
 
 def get_cv_path(filename: str, audio_dir: Path) -> Path:
-    # CommonVoice path resolution (implement based on your CV structure)
+    def build_cv_map(cv_dir: Path) -> dict:
+        cv_map = {}
+        for sub_dir in cv_dir.iterdir():
+            if not sub_dir.is_dir():
+                continue
+            for file in sub_dir.iterdir():
+                if file.is_file():
+                    cv_map[file.stem] = file.absolute()
+        return cv_map
+
+    if not hasattr(get_cv_path, "cv_map"):
+        get_cv_path.cv_map = build_cv_map(audio_dir)
+
     filename = Path(filename).stem
-    path = audio_dir / f"{filename}.wav"
+    path = get_cv_path.cv_map.get(filename, None)
     if not path.exists():
         logging.warning(f"{path} does not exist.")
         return None
