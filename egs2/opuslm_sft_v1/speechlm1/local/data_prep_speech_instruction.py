@@ -120,9 +120,6 @@ def main():
         "common_voice_en": cv_dir,
     }
 
-    # Create single dataset object for speech instruction task
-    dataset = DialogueDataset(task="audio_text_dialogue")
-
     subsets = [
         "closed_ended/acoustic_level",
         "closed_ended/comparison", 
@@ -149,9 +146,18 @@ def main():
                 
             logging.info(f"Processing file: {file}")
             
+            # Create separate output directory for each file to avoid OOM
+            writer_dir = output_dir / f"{subset.replace('/', '_')}_{file.stem}"
+            writer_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Create separate dataset for each file to avoid storing all data in memory
+            dataset = DialogueDataset(task="audio_text_dialogue")
+            wav_writer = (writer_dir / "wav.scp").open(mode="w")
+            
             lines = file.open(mode="r").readlines()
             metadata = [json.loads(line) for line in lines]
             
+            file_examples = 0
             for data in metadata:
                 try:
                     idx = data["id"]
@@ -191,18 +197,26 @@ def main():
                     
                     # Add to dataset
                     dataset.add_dialogue(dialogue_id, dialogue)
-                    total_examples += 1
+                    
+                    # Write wav.scp entry
+                    wav_writer.write(f"{dialogue_id}_turn0_speech {audio_path_str}\n")
+                    
+                    file_examples += 1
                         
                 except Exception as e:
                     logging.error(f"Error processing example {idx}: {e}")
                     continue
+            
+            wav_writer.close()
+            
+            # Save dataset for this file
+            if len(dataset.dialogues) > 0:
+                logging.info(f"Saving {len(dataset.dialogues)} examples to {writer_dir}")
+                dataset.dump_dataset(writer_dir)
+                total_examples += file_examples
+            else:
+                logging.warning(f"No valid examples found in {file}")
 
-    # Save dataset
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    logging.info(f"Saving {len(dataset.dialogues)} examples to {output_dir}")
-    dataset.dump_dataset(output_dir)
-    
     logging.info(f"Data preparation complete. Total: {total_examples} examples")
 
 

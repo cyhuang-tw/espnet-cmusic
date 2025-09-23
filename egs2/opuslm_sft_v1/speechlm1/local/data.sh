@@ -205,7 +205,7 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
         exit 1
     fi
     
-    # Prepare speech instruction data
+    # Prepare speech instruction data (now saves data file by file to avoid OOM)
     dir=dump/raw_audio_text_dialogue_speech_instruction
     python local/data_prep_speech_instruction.py \
       --output_dir ${dir} \
@@ -214,15 +214,23 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
       --mls_dir ${mls_dir} \
       --cv_dir ${cv_dir}
     
-    # Generate data.json file
-    if [ -d "${dir}" ] && [ -f "${dir}/data/dialogue.1" ]; then
-        cp ${dir}/data/dialogue.1 ${dir}/dialogue
-        python3 pyscripts/utils/make_speechlm_json.py \
-          --task audio_text_dialogue \
-          --output_json ${dir}/data.json \
-          --file_modality_type ${dir}/dialogue,dialogue,dialogue_json
-        log "Generated ${dir}/data.json with $(wc -l < ${dir}/dialogue) examples"
-    else
-        log "Warning: ${dir} directory or dialogue file not found"
-    fi
+    # Generate data.json files for each subdirectory (new structure)
+    total_examples=0
+    for subdirectory in ${dir}/*; do
+        if [ -d "${subdirectory}" ] && [ -f "${subdirectory}/data/dialogue.1" ]; then
+            subdir_name=$(basename ${subdirectory})
+            log "Processing subdirectory: ${subdir_name}"
+            
+            cp ${subdirectory}/data/dialogue.1 ${subdirectory}/dialogue
+            python3 pyscripts/utils/make_speechlm_json.py \
+              --task audio_text_dialogue \
+              --output_json ${subdirectory}/data.json \
+              --file_modality_type ${subdirectory}/dialogue,dialogue,dialogue_json
+            
+            subdir_examples=$(wc -l < ${subdirectory}/dialogue)
+            total_examples=$((total_examples + subdir_examples))
+            log "Generated ${subdirectory}/data.json with ${subdir_examples} examples"
+        fi
+    done
+    log "Total examples across all subdirectories: ${total_examples}"
 fi
