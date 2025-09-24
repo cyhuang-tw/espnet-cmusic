@@ -39,6 +39,7 @@ user_prompt_list=$assistant_prompt_list
 set +u
 . ./db.sh
 . ./path.sh
+. ./cmd.sh
 set -u
 
 if ! command -v huggingface-cli &> /dev/null; then
