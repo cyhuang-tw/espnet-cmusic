@@ -214,18 +214,68 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
       --mls_dir ${mls_dir} \
       --cv_dir ${cv_dir}
     
-    # Generate data.json files for each subdirectory (new structure)
+    # Tokenization parameters (consistent with speechlm_text_dialogue_to_speech_dialogue.sh)
+    nj=8
+    fs=16000
+    codec_choice=ESPnet
+    codec_hf_model_tag=ftshijt/espnet_codec_dac_large_v1.4_360epoch
+    ssl_choice=espnet_hubert
+    ssl_nlayer=18
+    ssl_checkpoint_path=exp/kmeans/38epoch.pth
+    ssl_kmeans_path=exp/kmeans/xeus_18_5000clusters/km_5000.mdl
+    ssl_batch_bins=5000000
+    
+    # Process each subdirectory and tokenize audio
     total_examples=0
     for subdirectory in ${dir}/*; do
         if [ -d "${subdirectory}" ] && [ -f "${subdirectory}/data/dialogue.1" ]; then
             subdir_name=$(basename ${subdirectory})
             log "Processing subdirectory: ${subdir_name}"
             
+            # Check if wav.scp exists and has content
+            if [ -f "${subdirectory}/wav.scp" ] && [ -s "${subdirectory}/wav.scp" ]; then
+                log "Tokenizing audio for ${subdir_name}"
+                
+                # Audio format conversion and tokenization
+                scripts/audio/format_wav_scp.sh \
+                    --nj "${nj}" \
+                    --cmd "${train_cmd}" \
+                    --audio-format "flac.ark" \
+                    --fs "${fs}" \
+                    --out_filename wav.scp \
+                    ${subdirectory}/wav.scp \
+                    ${subdirectory}/audio_raw
+                
+                # Create audio directory and copy metadata
+                mkdir -p ${subdirectory}/audio
+                cp ${subdirectory}/audio_raw/utt2num_samples ${subdirectory}/audio
+                
+                # Perform codec and SSL tokenization
+                scripts/feats/codec_ssl_tokenization.sh \
+                    --src_dir ${subdirectory}/audio_raw \
+                    --tgt_dir ${subdirectory}/audio \
+                    --file_name wav.scp \
+                    --fs ${fs} \
+                    --nj ${nj} \
+                    --codec_choice ${codec_choice} \
+                    --codec_hf_model_tag ${codec_hf_model_tag} \
+                    --codec_dump_audio false \
+                    --ssl_choice ${ssl_choice} \
+                    --ssl_checkpoint_path ${ssl_checkpoint_path} \
+                    --ssl_kmeans_path ${ssl_kmeans_path} \
+                    --ssl_nlayer ${ssl_nlayer} \
+                    --ssl_batch_bins ${ssl_batch_bins}
+            else
+                log "No audio files found in ${subdir_name}, skipping tokenization"
+            fi
+            
+            # Generate data.json with proper file references
             cp ${subdirectory}/data/dialogue.1 ${subdirectory}/dialogue
             python3 pyscripts/utils/make_speechlm_json.py \
               --task audio_text_dialogue \
               --output_json ${subdirectory}/data.json \
-              --file_modality_type ${subdirectory}/dialogue,dialogue,dialogue_json
+              --file_modality_type ${subdirectory}/dialogue,dialogue,dialogue_json \
+              --file_modality_type ${subdirectory}/audio/wav.scp,codec_ssl,kaldi_ark
             
             subdir_examples=$(wc -l < ${subdirectory}/dialogue)
             total_examples=$((total_examples + subdir_examples))

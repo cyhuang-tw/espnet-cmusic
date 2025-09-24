@@ -186,8 +186,8 @@ def main():
                     # Create dialogue with speech input + text instruction + text output
                     dialogue = Dialogue(task="audio_text_dialogue")
                     
-                    # User provides speech segment (as condition)
-                    dialogue.add_segment("user", "codec", False, audio_path_str)
+                    # User provides speech segment (as condition) - use codec_ssl for tokenized speech
+                    dialogue.add_segment("user", "codec_ssl", False, audio_path_str)
                     
                     # User provides text instruction (as condition)  
                     dialogue.add_segment("user", "text_bpe", False, question)

@@ -11,7 +11,7 @@ corelm_conf:
 
 # Loss configuration optimized for instruction tuning
 modality_weights: {
-    "codec": 0.5,           # Speech input (condition)
+    "codec_ssl": 0.5,       # Tokenized speech input (condition)
     "text_bpe": 1.0,        # Text instructions and responses
     "special_token": 1.0,   # Role and task tokens
 }
@@ -29,6 +29,8 @@ log_interval: 100
 # Data preprocessing for instruction tuning
 codec_token_per_frame: 9
 codec_token_in_use: 9
+ssl_token_per_frame: 2  # SSL tokens per frame
+ssl_token_in_use: 2
 speaker_prompt_length: 500
 
 # Spec augmentation for speech input
