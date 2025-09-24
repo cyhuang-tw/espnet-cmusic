@@ -30,8 +30,15 @@ if [ -d "${base_dir}" ]; then
     train_jsons=$(cat "${train_jsons_file}" | tr '\n' ' ' | sed 's/ $//')
     valid_jsons=$(cat "${valid_jsons_file}" | tr '\n' ' ' | sed 's/ $//')
     
+    # Create a temporary config file to pass these variables
+    config_file=$(mktemp --suffix=.conf)
+    cat > "${config_file}" << EOF
+train_jsons="${train_jsons}"
+valid_jsons="${valid_jsons}"
+EOF
+    
     # Set cleanup trap
-    trap "rm -f '${train_jsons_file}' '${valid_jsons_file}'" EXIT
+    trap "rm -f '${train_jsons_file}' '${valid_jsons_file}' '${config_file}'" EXIT
 else
     echo "Warning: ${base_dir} not found. Please run data preparation first."
     exit 1
@@ -46,9 +53,9 @@ token_list_dir=data/token_list/llm_vocab_olmo  # Use LLM vocab
 bpe_opts="--subword_choice huggingface --subword_model allenai/OLMo-2-1124-7B"
 
 # Run speechlm training pipeline
-# Use environment variables to pass train_jsons and valid_jsons to avoid argument length limits
-env train_jsons="${train_jsons}" valid_jsons="${valid_jsons}" \
+# Use a temporary config file to pass train_jsons and valid_jsons to avoid argument length limits
 ./speechlm.sh \
+    --config "${config_file}" \
     --skip_data_prep true \
     --data_combo_name speech_instruction \
     --fs 16000 \
