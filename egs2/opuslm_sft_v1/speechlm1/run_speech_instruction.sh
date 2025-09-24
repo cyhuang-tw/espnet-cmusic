@@ -17,37 +17,21 @@ if [ -d "${base_dir}" ]; then
     train_jsons_file=$(mktemp)
     valid_jsons_file=$(mktemp)
     
-    # Find all data.json files and write them to temporary files
-    find "${base_dir}" -name "data.json" -type f | sort > "${train_jsons_file}"
+    # Find all data.json files but exclude those in stats directories
+    find "${base_dir}" -name "data.json" -type f -not -path "*/stats/*" | sort > "${train_jsons_file}"
     cp "${train_jsons_file}" "${valid_jsons_file}"
     
-    # Export the file paths for speechlm.sh to use
-    export TRAIN_JSONS_FILE="${train_jsons_file}"
-    export VALID_JSONS_FILE="${valid_jsons_file}"
     
     echo "Found $(wc -l < "${train_jsons_file}") training datasets"
     echo "First few datasets:"
     head -3 "${train_jsons_file}"
     
-    # Create wrapper script for speechlm.sh to handle the file list
-    wrapper_script=$(mktemp)
-    cat > "${wrapper_script}" << 'EOF'
-#!/bin/bash
-# Read the JSON file paths from the temporary files
-if [ -f "${TRAIN_JSONS_FILE}" ] && [ -f "${VALID_JSONS_FILE}" ]; then
-    train_jsons=$(cat "${TRAIN_JSONS_FILE}" | tr '\n' ' ' | sed 's/ $//')
-    valid_jsons=$(cat "${VALID_JSONS_FILE}" | tr '\n' ' ' | sed 's/ $//')
-    export train_jsons
-    export valid_jsons
-fi
-
-# Execute the original speechlm.sh with all arguments
-exec ./speechlm.sh "$@"
-EOF
-    chmod +x "${wrapper_script}"
+    # Convert to space-separated strings for speechlm.sh
+    train_jsons=$(cat "${train_jsons_file}" | tr '\n' ' ' | sed 's/ $//')
+    valid_jsons=$(cat "${valid_jsons_file}" | tr '\n' ' ' | sed 's/ $//')
     
     # Set cleanup trap
-    trap "rm -f '${train_jsons_file}' '${valid_jsons_file}' '${wrapper_script}'" EXIT
+    trap "rm -f '${train_jsons_file}' '${valid_jsons_file}'" EXIT
 else
     echo "Warning: ${base_dir} not found. Please run data preparation first."
     exit 1
@@ -61,8 +45,10 @@ inference_config=conf/decode_general.yaml
 token_list_dir=data/token_list/llm_vocab_olmo  # Use LLM vocab
 bpe_opts="--subword_choice huggingface --subword_model allenai/OLMo-2-1124-7B"
 
-# Run speechlm training pipeline using wrapper script
-${wrapper_script} \
+# Run speechlm training pipeline
+# Use environment variables to pass train_jsons and valid_jsons to avoid argument length limits
+env train_jsons="${train_jsons}" valid_jsons="${valid_jsons}" \
+./speechlm.sh \
     --skip_data_prep true \
     --data_combo_name speech_instruction \
     --fs 16000 \
