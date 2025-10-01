@@ -29,8 +29,6 @@ log_interval: 100
 # Data preprocessing for instruction tuning
 codec_token_per_frame: 9
 codec_token_in_use: 9
-ssl_token_per_frame: 2  # SSL tokens per frame
-ssl_token_in_use: 2
 speaker_prompt_length: 500
 
 # Spec augmentation for speech input

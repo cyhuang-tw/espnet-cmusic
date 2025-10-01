@@ -76,8 +76,7 @@ def get_cv_path(filename: str, audio_dir: Path) -> Path:
             if not sub_dir.is_dir():
                 continue
             for file in sub_dir.iterdir():
-                if file.is_file():
-                    cv_map[file.stem] = file.absolute()
+                cv_map[file.stem] = file.absolute()
         return cv_map
 
     if not hasattr(get_cv_path, "cv_map"):
@@ -185,21 +184,24 @@ def main():
                     
                     # Create dialogue with speech input + text instruction + text output
                     dialogue = Dialogue(task="audio_text_dialogue")
-                    
-                    # User provides speech segment (as condition) - use codec_ssl for tokenized speech
-                    dialogue.add_segment("user", "codec_ssl", False, audio_path_str)
-                    
-                    # User provides text instruction (as condition)  
+
+                    # User provides speech segment (as condition)
+                    # NOTE: Store the dialogue_id as a placeholder. The actual tokenized
+                    # codec_ssl path will be resolved during training via wav.scp
+                    dialogue.add_segment("user", "codec_ssl", False, dialogue_id)
+
+                    # User provides text instruction (as condition)
                     dialogue.add_segment("user", "text_bpe", False, question)
-                    
+
                     # Assistant provides text response (as target)
                     dialogue.add_segment("assistant", "text_bpe", True, answer)
-                    
+
                     # Add to dataset
                     dataset.add_dialogue(dialogue_id, dialogue)
-                    
-                    # Write wav.scp entry
-                    wav_writer.write(f"{dialogue_id}_turn0_speech {audio_path_str}\n")
+
+                    # Write wav.scp entry with original audio path
+                    # This will be tokenized and the tokenized version will be loaded via kaldi_ark
+                    wav_writer.write(f"{dialogue_id} {audio_path_str}\n")
                     
                     file_examples += 1
                         
