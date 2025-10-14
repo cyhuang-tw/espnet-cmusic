@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# set -euo pipefail
+set -eo pipefail
 SECONDS=0
 log() {
     local fname=${BASH_SOURCE[1]##*/}

@@ -85,7 +85,7 @@ def get_cv_path(filename: str, audio_dir: Path) -> Path:
 
     filename = Path(filename).stem
     path = get_cv_path.cv_map.get(filename, None)
-    if path is None:
+    if path is None or not path.exists():
         logging.warning(f"{filename} does not exist.")
         return None
     return path
@@ -140,8 +140,7 @@ def main():
             
         files = list(curr_dir.iterdir())
         random.shuffle(files)
-        files = files[:25]
-        
+        files = files[:10]
         logging.info(f"Processing subset: {subset} with {len(files)} files")
 
         for file in files:
@@ -152,12 +151,15 @@ def main():
             
             # Create separate output directory for each file to avoid OOM
             writer_dir = output_dir / f"{subset.replace('/', '_')}_{file.stem}"
+            if writer_dir.exists():
+                logging.info(f"Skipping existing directory: {writer_dir}")
+                continue
             writer_dir.mkdir(exist_ok=True, parents=True)
-            
+
             # Create separate dataset for each file to avoid storing all data in memory
-            dataset = DialogueDataset(task="audio_text_dialogue")
             wav_writer = (writer_dir / "wav.scp").open(mode="w")
-            data_dict = {}
+            instr_writer = (writer_dir / "prompt").open(mode="w")
+            output_writer = (writer_dir / "text").open(mode="w")
             
             lines = file.open(mode="r").readlines()
             metadata = [json.loads(line) for line in lines]
@@ -189,30 +191,12 @@ def main():
                     dialogue_id = f"{subset.replace('/', '_')}_{file.stem}_{idx}_{random_uuid}"
                     
                     # Create dialogue with speech input + text instruction + text output
-                    dialogue = Dialogue(task="audio_text_dialogue")
-
-                    # User provides speech segment (as condition)
-                    # NOTE: Store the dialogue_id as a placeholder. The actual tokenized
-                    # codec_ssl path will be resolved during training via wav.scp
-                    # dialogue.add_segment("user", "codec_ssl", False, dialogue_id)
-
-                    # User provides text instruction (as condition)
-                    dialogue.add_segment("user", "text_bpe", False, question)
-
-                    # Assistant provides text response (as target)
-                    dialogue.add_segment("assistant", "text_bpe", True, answer)
-
-                    # Add to dataset
-                    dataset.add_dialogue(dialogue_id, dialogue)
-
                     # Write wav.scp entry with original audio path
                     # This will be tokenized and the tokenized version will be loaded via kaldi_ark
                     wav_writer.write(f"{dialogue_id} {audio_path_str}\n")
-                    data_dict[dialogue_id] = {
-                        "question": question,
-                        "answer": answer,
-                        "audio": audio_path_str,
-                    }
+                    instr_writer.write(f"{dialogue_id} {question}\n")
+                    output_writer.write(f"{dialogue_id} {answer}\n")
+
                     
                     file_examples += 1
                         
@@ -221,18 +205,11 @@ def main():
                     continue
             
             wav_writer.close()
-            
-            # Save dataset for this file
-            if len(dataset.dialogues) > 0:
-                logging.info(f"Saving {len(dataset.dialogues)} examples to {writer_dir}")
-                dataset.dump_dataset(writer_dir)
-                with (writer_dir / "data.json").open(mode="wb") as f:
-                    f.write(json.dumps(data_dict, f, indent=4, ensure_ascii=False, sort_keys=False).encode("utf_8"))
-                total_examples += file_examples
-            else:
-                logging.warning(f"No valid examples found in {file}")
+            instr_writer.close()
+            output_writer.close()
 
-    logging.info(f"Data preparation complete. Total: {total_examples} examples")
+    # logging.info(f"Data preparation complete. Total: {total_examples} examples")
+    logging.info(f"Data preparation complete.")
 
 
 if __name__ == "__main__":

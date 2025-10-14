@@ -6,7 +6,7 @@
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
-set -u
+# set -u
 set -o pipefail
 
 log() {
@@ -519,13 +519,13 @@ if ! ${skip_data_prep}; then
 fi
 
 if ! ${skip_train}; then
-    if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
-        log "Generate vocabulary from the given train_jsons"
-        mkdir -p ${token_list_dir}
-        ${python} pyscripts/utils/make_token_list_speechlm.py \
-            --data_json ${train_jsons} \
-            --token_list_dir ${token_list_dir}
-    fi
+    # if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
+    #     log "Generate vocabulary from the given train_jsons"
+    #     mkdir -p ${token_list_dir}
+    #     ${python} pyscripts/utils/make_token_list_speechlm.py \
+    #         --data_json ${train_jsons} \
+    #         --token_list_dir ${token_list_dir}
+    # fi
 
     if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
         log "Stage 7: SpeechLM collect stats: train_jsons=${train_jsons}, valid_set=${valid_jsons}"
@@ -693,6 +693,7 @@ if ! ${skip_train}; then
                 --sharded_dataset true \
                 --resume true \
                 --output_dir "${speechlm_exp}" \
+                --init_param "/work/hdd/bbjs/chuang14/model.pth" \
                 ${_opts} ${_data_opts} ${train_args}
 
     fi

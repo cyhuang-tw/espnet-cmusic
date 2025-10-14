@@ -3,35 +3,37 @@ transformer: huggingface
 transformer_conf:
     hf_model_tag: allenai/OLMo-2-1124-7B
     activation_checkpointing: true
-    n_ctx: 32768  # Increased context length for instruction following
+    n_ctx: 2048  # Increased to prevent truncating target text (audio can be long)
     
 corelm: ar_delay
 corelm_conf:
     share_emb: false
 
-# Loss configuration optimized for instruction tuning
+# loss
 modality_weights: {
-    "codec_ssl": 0.5,       # Tokenized speech input (condition)
-    "text_bpe": 1.0,        # Text instructions and responses
-    "special_token": 1.0,   # Role and task tokens
+    "g2p": 1.0,
+    "ssl": 0.5,
+    "codec": 0.0625,
+    "text_bpe": 1.0,
+    "special_token": 1.0,
 }
-loss_region: target  # Only compute loss on assistant responses
+loss_region: target
 loss_type: sum
 
 # General Dataloader configuration
 batch_type: numel
-batch_bins: 8000  # Reduced for longer sequences
+batch_bins: 128  # Reduced for OOM during optimizer.step
 max_epoch: 3
 num_workers: 6
 drop_last_iter: false
 log_interval: 100
 
-# Data preprocessing for instruction tuning
+# Data preprocessing
 codec_token_per_frame: 9
 codec_token_in_use: 9
-speaker_prompt_length: 500
+speaker_prompt_length: 50
 
-# Spec augmentation for speech input
+# specaug
 asr_apply_time_mask: true
 asr_time_mask_config:
     mask_width_ratio_range:
@@ -39,7 +41,7 @@ asr_time_mask_config:
     - 0.05
     num_mask: 10
 
-# DeepSpeed configuration
+# deepspeed
 use_deepspeed: true
 deepspeed_config: conf/deepspeed_ddp_zero2_olmo.json
 deepspeed_step_sync: false

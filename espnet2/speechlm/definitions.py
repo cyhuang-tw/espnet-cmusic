@@ -250,6 +250,11 @@ SPEECHLM_TASKS["audio_text_dialogue"] = SpeechLMTaskTemplate(
     targets=[("dialogue", "dialogue", "dialogue_json")],
 )
 
+SPEECHLM_TASKS["instruction_tuning"] = SpeechLMTaskTemplate(
+    conditions=[("prompt", "text_bpe", "text"), ("wav.scp", "codec_ssl", "kaldi_ark")],
+    targets=[("text", "text_bpe", "text")],
+)
+
 # END OF TASK DEFINITION #
 
 # (3) Special token definition

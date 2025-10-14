@@ -156,34 +156,6 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     done
 fi
 
-if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
-    log "Convert SIFT-50M dataset"
-    dir=dump/raw_text_dialogue_sift50m
-    python local/data_prep_sift50m.py \
-      --output_dir ${dir} --root_dir ${sift_dir} \
-      --vctk_dir ${vctk_dir} --mls_dir ${mls_dir} --cv_dir ${cv_dir}
-
-    # Create dummy user_prompt_list and assistant_prompt_list
-    mkdir -p tmp_
-    touch tmp_/prompt.scp
-    # Audio-Text dialogues
-    tgt_dir=dump/raw_audio_text_dialogue_sift50m
-    # for dset in closed_ended_acoustic_level closed_ended_comparison closed_ended_content_level closed_ended_word_align open_ended; do
-    for dset in ${dir}/*; do
-      dset=$(basename ${dset})
-      cp ${dir}/${dset}/data/dialogue.1 ${dir}/${dset}/dialogue
-
-      bash scripts/utils/speechlm_text_dialogue_to_speech_dialogue.sh \
-        --input_dir ${dir}/${dset} \
-        --output_dir ${tgt_dir}/${dset} \
-        --task audio_text_dialogue \
-        --ready_audio_list ${dir}/${dset}/wav.scp \
-        --user_prompt_list tmp_/prompt.scp \
-        --assistant_prompt_list tmp_/prompt.scp
-    done
-    rm -rf tmp_/prompt.scp
-    rmdir --ignore-fail-on-non-empty tmp_ || true
-fi
 
 if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
     log "Convert SIFT-50M dataset for Speech Instruction Tuning"
@@ -207,8 +179,8 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
     fi
     
     # Prepare speech instruction data (now saves data file by file to avoid OOM)
-    dir=dump/raw_audio_text_dialogue_speech_instruction
-    python local/data_prep_speech_instruction.py \
+    dir=/work/hdd/bbjs/chuang14/dump/raw_audio_text_dialogue_speech_instruction
+    python local/data_prep_instr_tuning.py \
       --output_dir ${dir} \
       --root_dir ${sift_dir} \
       --vctk_dir ${vctk_dir} \
@@ -229,7 +201,7 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
     # Process each subdirectory and tokenize audio
     total_examples=0
     for subdirectory in ${dir}/*; do
-        if [ -d "${subdirectory}" ] && [ -f "${subdirectory}/data/dialogue.1" ]; then
+        if [ -d "${subdirectory}" ]; then
             subdir_name=$(basename ${subdirectory})
             log "Processing subdirectory: ${subdir_name}"
             
@@ -271,16 +243,18 @@ if [ ${stage} -le 7 ] && [ ${stop_stage} -ge 7 ]; then
             fi
             
             # Generate data.json with proper file references
-            cp ${subdirectory}/data/dialogue.1 ${subdirectory}/dialogue
+            # cp ${subdirectory}/data/dialogue.1 ${subdirectory}/dialogue
             python3 pyscripts/utils/make_speechlm_json.py \
-              --task audio_text_dialogue \
+              --task instruction_tuning \
               --output_json ${subdirectory}/data.json \
-              --file_modality_type ${subdirectory}/dialogue,dialogue,dialogue_json \
-              --file_modality_type ${subdirectory}/audio/wav.scp,codec_ssl,kaldi_ark
+              --file_modality_type ${subdirectory}/audio/wav.scp,codec_ssl,kaldi_ark \
+              --file_modality_type ${subdirectory}/prompt,text_bpe,text \
+              --file_modality_type ${subdirectory}/text,text_bpe,text
+
             
-            subdir_examples=$(wc -l < ${subdirectory}/dialogue)
-            total_examples=$((total_examples + subdir_examples))
-            log "Generated ${subdirectory}/data.json with ${subdir_examples} examples"
+            # subdir_examples=$(wc -l < ${subdirectory}/dialogue)
+            # total_examples=$((total_examples + subdir_examples))
+            # log "Generated ${subdirectory}/data.json with ${subdir_examples} examples"
         fi
     done
     log "Total examples across all subdirectories: ${total_examples}"
