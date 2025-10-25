@@ -7,10 +7,9 @@ import joblib
 from pathlib import Path
 
 from .abs_io import AbsIO
-from espnet2.speechlm.utils.data import pad_list
 
 
-class ApplyKmeans:
+class KmeansModel(torch.nn.Module):
     """Apply k-means clustering to quantize SSL features into discrete tokens.
 
     This class loads a pre-trained k-means model and uses it to convert
@@ -24,12 +23,13 @@ class ApplyKmeans:
             km_path: Path to saved k-means model file
             device: Device to place tensors on (default: "cpu")
         """
+        super().__init__()
         km_model = joblib.load(km_path)
         C_np = km_model.cluster_centers_.transpose()
         Cnorm_np = (C_np**2).sum(0, keepdims=True)
 
-        self.C = torch.from_numpy(C_np).to(device)
-        self.Cnorm = torch.from_numpy(Cnorm_np).to(device)
+        self.register_buffer("C", torch.from_numpy(C_np).to(device))
+        self.register_buffer("Cnorm", torch.from_numpy(Cnorm_np).to(device))
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """Quantize features to nearest cluster centers.
@@ -221,7 +221,7 @@ class DiscreteAudioIO(AbsIO):
             self.ssl_model.eval()
 
             # Load k-means quantizer with correct device
-            self.km_model = ApplyKmeans(ssl_kmeans_path, device=self.device)
+            self.km_model = KmeansModel(ssl_kmeans_path, device=self.device)
 
             # Extract SSL metadata
             # NOTE: Cannot parse the metadata from hubert_train_args, using hardcoded values for XEUS
@@ -308,21 +308,23 @@ class DiscreteAudioIO(AbsIO):
         self._stream_intervals = []
         current_offset = 0
 
+        # NOTE(Jinchuan): the first token of each stream is an audio_pad token
+        # used in delay interleave
         # Add intervals for SSL streams (first)
         if self.use_ssl:
             for vocab_size in self.ssl_vocab_size:
                 self._stream_intervals.append(
-                    (current_offset, current_offset + vocab_size)
+                    (current_offset, current_offset + vocab_size + 1)
                 )
-                current_offset += vocab_size
+                current_offset += vocab_size + 1
 
         # Add intervals for codec streams (after SSL)
         if self.use_codec:
             for vocab_size in self.codec_vocab_size:
                 self._stream_intervals.append(
-                    (current_offset, current_offset + vocab_size)
+                    (current_offset, current_offset + vocab_size + 1)
                 )
-                current_offset += vocab_size
+                current_offset += vocab_size + 1
 
         # Build vocabulary list
         self.vocabulary = []
@@ -330,26 +332,28 @@ class DiscreteAudioIO(AbsIO):
         # Add SSL vocabulary (comes first)
         if self.use_ssl:
             for stream_idx, vocab_size in enumerate(self.ssl_vocab_size):
+                self.vocabulary.append(f"<ssl_layer{stream_idx}_pad>")
                 for token_id in range(vocab_size):
                     self.vocabulary.append(f"<ssl_layer{stream_idx}_{token_id}>")
 
         # Add codec vocabulary (comes after SSL)
         if self.use_codec:
             for stream_idx, vocab_size in enumerate(self.codec_vocab_size):
+                self.vocabulary.append(f"<codec_layer{stream_idx}_pad>")
                 for token_id in range(vocab_size):
                     self.vocabulary.append(f"<codec_layer{stream_idx}_{token_id}>")
 
         # Add audio padding token
-        self.vocabulary.append("<audio_pad>")
         self.audio_pad = len(self.vocabulary) - 1
 
+    @torch.no_grad()
     def encode_batch(
         self, data: torch.Tensor, lengths: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode a batch of audio data into discrete tokens.
 
         Args:
-            data: Audio tensor of shape [batch, num_channel, num_samples]
+            data: Audio tensor of shape [batch, samples, num_channel]
             lengths: Effective sample lengths [batch]
 
         Returns:
@@ -357,55 +361,54 @@ class DiscreteAudioIO(AbsIO):
                 - codes: Encoded tokens [batch, time, n_streams]
                 - frame_lengths: Frame lengths [batch]
         """
+
         if data.dim() != 3:
             raise ValueError(
-                f"Expected 3D tensor [batch, channels, samples], got {data.dim()}D"
+                f"Expected 3D tensor [batch, samples, num_channel], got {data.dim()}D"
             )
 
-        # Calculate frame lengths and trim audio to frame boundaries
-        frame_length = lengths // self.frame_shift
-        length = frame_length * self.frame_shift
+        data = data.transpose(1, 2)
 
-        data = data[:, :, : max(length)]
+        # Calculate frame lengths and trim audio to frame boundaries
+        frame_lengths = lengths // self.frame_shift
+        lengths = frame_lengths * self.frame_shift
+        data = data[:, :, : max(lengths)]
 
         # Encode with SSL and/or codec
-        ssl_codes = self._ssl_encode_batch(data, length) if self.use_ssl else None
-        codec_codes = self._codec_encode_batch(data, length) if self.use_codec else None
+        ssl_codes = self._ssl_encode_batch(data, lengths) if self.use_ssl else None
+        codec_codes = (
+            self._codec_encode_batch(data, lengths) if self.use_codec else None
+        )
 
         # Initialize codes tensor with padding
         batch_size = data.size(0)
-        max_frames = max(frame_length).item()
-        codes = (
-            torch.ones(
-                batch_size,
-                max_frames,
-                self.num_stream(),
-                dtype=torch.long,
-                device=data.device,
-            )
-            * self.audio_pad
-        )
+        max_frames = max(frame_lengths).item()
+        codes = [c[0] for c in self._stream_intervals]
+        codes = torch.Tensor(codes).to(dtype=torch.long, device=data.device)
+        codes = codes.tile(batch_size, max_frames, 1)
+
+        def ensure_length(codes, length):
+            cur_length = codes.size(1)
+            if cur_length > length:
+                codes = codes[:, :length]
+            elif cur_length < length:
+                diff = length - cur_length
+                codes = torch.nn.functional.pad(
+                    codes, (0, 0, 0, diff), mode="replicate"
+                )
+            return codes
 
         # Fill in SSL codes (first streams)
         if self.use_ssl and ssl_codes is not None:
-            min_frames = min(max_frames, ssl_codes.size(1))
-            codes[:, :min_frames, : self.ssl_n_streams] = ssl_codes[:, :min_frames]
+            codes[:, :, : self.ssl_n_streams] = ensure_length(ssl_codes, max_frames)
 
         # Fill in codec codes (after SSL streams)
         if self.use_codec and codec_codes is not None:
-            min_frames = min(max_frames, codec_codes.size(1))
-            codes[:, :min_frames, self.ssl_n_streams :] = codec_codes[:, :min_frames]
+            codes[:, :, self.ssl_n_streams :] = ensure_length(codec_codes, max_frames)
 
         # Add vocabulary offsets for each stream to map to global vocabulary
-        if self.get_stream_interval():  # Only if intervals exist
-            for stream_idx, (offset_start, _) in enumerate(self.get_stream_interval()):
-                # Only add offset to non-padding tokens
-                mask = codes[..., stream_idx] != self.audio_pad
-                codes[..., stream_idx] = torch.where(
-                    mask,
-                    codes[..., stream_idx] + offset_start,
-                    codes[..., stream_idx],
-                )
+        for stream_idx, (offset_start, _) in enumerate(self._stream_intervals):
+            codes[..., stream_idx] = codes[..., stream_idx] + offset_start + 1
 
         if self.delay_interleave:
             codes = self._apply_delay_interleave(codes)
@@ -454,15 +457,9 @@ class DiscreteAudioIO(AbsIO):
         # Remove vocabulary offsets to get original token indices
         for stream_idx in range(self.codec_n_streams):
             global_stream_idx = self.ssl_n_streams + stream_idx
-            offset_start, _ = self.get_stream_interval()[global_stream_idx]
+            offset_start, _ = self._stream_intervals[global_stream_idx]
 
-            # Create mask for non-padding tokens and subtract offset
-            mask = codec_codes[..., stream_idx] != self.audio_pad
-            codec_codes[..., stream_idx] = torch.where(
-                mask,
-                codec_codes[..., stream_idx] - offset_start,
-                codec_codes[..., stream_idx],
-            )
+            codec_codes[..., stream_idx] -= offset_start + 1
 
         # Decode codec tokens to audio
         audio, audio_lengths = self._codec_decode_batch(codec_codes, lengths)
@@ -583,10 +580,10 @@ class DiscreteAudioIO(AbsIO):
 
         wav, _ = data
         length = self.find_length(data)
-        
+
         ones = np.ones((length, self.num_stream())).astype(np.int32)
         paddings = ones * 0
-        conti_feat = (length, wav)
+        conti_feat = (length, wav.T)
         loss_mask = ones * np.array(self.stream_weights).reshape(1, -1)
 
         return paddings, conti_feat, loss_mask
@@ -643,13 +640,9 @@ class DiscreteAudioIO(AbsIO):
         """
         B, T, N = codes.size()
 
-        # Create output tensor with extended time dimension
-        new_codes = (
-            torch.ones(
-                B, T + self.num_stream() - 1, N, dtype=codes.dtype, device=codes.device
-            )
-            * self.audio_pad
-        )
+        new_codes = [c[0] for c in self._stream_intervals]
+        new_codes = torch.Tensor(new_codes).to(dtype=torch.long, device=codes.device)
+        new_codes = new_codes.tile(B, T + self.num_stream() - 1, 1)
 
         # Apply delay to each stream
         for n in range(N):
@@ -711,6 +704,7 @@ class DiscreteAudioIO(AbsIO):
 
         return worker_copy
 
+
 class ContinuousAudioIO(AbsIO):
     """Continuous audio I/O for feature extraction.
 
@@ -765,7 +759,11 @@ class ContinuousAudioIO(AbsIO):
                     attn_implementation=self.attn_implementation,
                     torch_dtype=self.dtype,
                 )
-                self.model = full_model.thinker.audio_tower.to(self.device)
+
+                del full_model.thinker.model
+                del full_model.thinker.visual
+                del full_model.thinker.lm_head
+                self.model = full_model.thinker.to(self.device)
 
                 # Load processor for audio preprocessing
                 self.processor = Qwen2_5OmniProcessor.from_pretrained(
@@ -773,11 +771,10 @@ class ContinuousAudioIO(AbsIO):
                 ).feature_extractor
 
                 # Set model attributes
-                self.d_model = self.model.config.d_model
+                self.d_model = self.model.audio_tower.config.output_dim
                 self.sample_rate = self.processor.sampling_rate
                 self.hop_length = self.processor.hop_length
                 self.n_samples = self.processor.n_samples
-                self.down_sample = 4  # Hardcoded for Qwen
 
             else:
                 raise NotImplementedError(
@@ -792,44 +789,54 @@ class ContinuousAudioIO(AbsIO):
         wav, fs = data
         if fs != self.sample_rate:
             raise ValueError("Imcompatible sampling rate")
-        
+
         if wav.shape[0] != 1:
             raise ValueError("Only support single-channel audio")
         wav = wav[0]
 
         if wav.shape[0] > self.n_samples:
             raise ValueError("Input audio is too long to process")
-        
-        feat = self.processor(
+
+        output = self.processor(
             [wav],
-            truncation=False, 
-            return_tensors='np',
+            truncation=False,
+            return_tensors="np",
             do_normalize=True,
             return_token_stamps=True,
-            sampling_rate=self.sample_rate
-        )['input_features'][0].T
-
-        length = self.find_length(data)
-        paddings = np.zeros((length, 1)).astype(np.int32)
-
-        return paddings, (length, feat), paddings
-    
-    def encode_batch(self, batch_data) -> Dict:
-        """Encode batch data (not implemented for continuous audio).
-
-        Args:
-            batch_data: Batch of audio data
-
-        Raises:
-            NotImplementedError: Continuous audio uses preprocess instead
-        """
-        raise NotImplementedError(
-            "Use preprocess for single-item processing. "
-            "Batch processing not implemented for continuous audio."
+            return_attention_mask=True,
+            sampling_rate=self.sample_rate,
         )
+
+        before_length = output["attention_mask"].sum()
+        feat = output["input_features"][0, :, :before_length].T
+
+        after_length = (before_length - 1) // 2 + 1
+        after_length = (after_length - 2) // 2 + 1
+
+        paddings = np.zeros((after_length, 1)).astype(np.int32)
+
+        return paddings, (after_length, feat), paddings
+
+    def encode_batch(self, batch_data, length) -> Dict:
+
+        batch_data = batch_data.transpose(1, 2)
+        axis = torch.arange(max(length), dtype=torch.long, device=batch_data.device)
+        mask = (axis.unsqueeze(0) < length.unsqueeze(1)).int()
+
+        audio_features = self.model.get_audio_features(
+            batch_data,
+            feature_attention_mask=mask,
+        )
+        output_length = (length - 1) // 2 + 1
+        output_length = (output_length - 2) // 2 + 1
+        audio_features = audio_features.split(output_length.tolist(), dim=0)
+
+        return audio_features
 
     def find_length(self, data: Tuple[np.ndarray, int]) -> int:
         """Calculate frame length after encoding.
+
+        We don't call self.processor as it's very slow to find the length
 
         Args:
             data: Tuple of (audio_array, sample_rate) where audio_array
@@ -839,7 +846,9 @@ class ContinuousAudioIO(AbsIO):
             Frame length after encoding (number of frames)
         """
         wav, _ = data
-        frame_length = wav.shape[-1] // self.hop_length // self.down_sample
+        frame_length = wav.shape[-1] // self.hop_length
+        frame_length = (frame_length - 1) // 2 + 1
+        frame_length = (frame_length - 2) // 2 + 1
 
         return int(frame_length)
 

@@ -12,6 +12,8 @@ import torch.nn as nn
 import deepspeed
 import wandb
 
+from espnet2.speechlm.utils.data import to_device
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +58,24 @@ class DeepSpeedTrainer:
         (self.output_dir / "checkpoints").mkdir(exist_ok=True, parents=True)
 
         self.global_step = 0
-        self.max_step = trainer_args['max_step']
-        self.save_interval = trainer_args['save_interval']
-        self.log_interval = trainer_args['log_interval']
+        self.max_step = trainer_args["max_step"]
+        self.save_interval = trainer_args["save_interval"]
+        self.log_interval = trainer_args["log_interval"]
+
+        # freeze parameters
+        for t in trainer_args.get("freeze_param", []):
+            for k, p in model.named_parameters():
+                if k.startswith(t + ".") or k == t:
+                    logger.info(f"Setting {k}.requires_grad = False")
+                    p.requires_grad = False
 
         # Initialization
-        ds_config_path = self.trainer_args['deepspeed_config']
-        with open(ds_config_path, 'r') as f:
+        ds_config_path = self.trainer_args["deepspeed_config"]
+        with open(ds_config_path, "r") as f:
             ds_config = json.load(f)
-        self.model_engine, _, _, _ = (
-            deepspeed.initialize(
-                model=model,
-                config=ds_config,
-            )
+        self.model_engine, _, _, _ = deepspeed.initialize(
+            model=model,
+            config=ds_config,
         )
         logger.info("Successfully initialize DeepSpeed with configuration")
         logger.info(json.dumps(ds_config, indent=2))
@@ -76,6 +83,9 @@ class DeepSpeedTrainer:
 
         # Load checkpoint
         self._load_checkpoint(resume_path)
+
+        # train dtype
+        self.dtype = self.train_dtype(ds_config)
 
     def _load_checkpoint(self, resume_path: Optional[Path]) -> None:
         """Load checkpoint for resuming training."""
@@ -89,22 +99,21 @@ class DeepSpeedTrainer:
         elif (self.output_dir / "checkpoints").exists():
             ckpt_dir = self.output_dir / "checkpoints"
             checkpoints = [
-                d for d in ckpt_dir.iterdir()
-                if d.is_dir() and "step_" in d.name
+                d for d in ckpt_dir.iterdir() if d.is_dir() and "step_" in d.name
             ]
             if checkpoints:
                 # Sort by step number and get latest
                 checkpoint_path = sorted(
                     checkpoints,
                     key=lambda x: int(x.name.split("step_")[-1]),
-                    reverse=True
+                    reverse=True,
                 )[0]
 
         if checkpoint_path:
             _, client_state = self.model_engine.load_checkpoint(str(checkpoint_path))
             # Restore global_step from client_state if available
-            if client_state and 'global_step' in client_state:
-                self.global_step = client_state['global_step']
+            if client_state and "global_step" in client_state:
+                self.global_step = client_state["global_step"]
             logger.info(
                 f"Loaded checkpoint: {checkpoint_path} | step={self.global_step}"
             )
@@ -120,14 +129,15 @@ class DeepSpeedTrainer:
             self.valid()
 
             # Save checkpoint with client_state containing global_step
-            client_state = {'global_step': self.global_step}
+            client_state = {"global_step": self.global_step}
             self.model_engine.save_checkpoint(
-                self.output_dir / 'checkpoints' / f'step_{self.global_step}',
+                self.output_dir / "checkpoints" / f"step_{self.global_step}",
                 client_state=client_state,
             )
 
         # Finish wandb run when training is complete
         wandb.finish()
+
     def train(self) -> None:
         """Execute one training epoch."""
         self.model_engine.train()
@@ -137,16 +147,18 @@ class DeepSpeedTrainer:
             length=self.save_interval,
         )
         for batch in iterator:
-            loss, stats = self.model_engine(**batch)
-            self.model_engine.backward(loss)
+            batch = to_device(batch, "cuda", dtype=self.dtype)
+            out = self.model_engine(**batch)
+
+            self.model_engine.backward(out["loss"])
             self.model_engine.step()
 
-            self.global_step += 1
-
             # TODO: sync the stats across GPUs before logging
-            assert all(isinstance(v, float) for v in stats.values())
+            stats = {k: float(v) for k, v in out["stats"].items()}
             stats = {f"train/{key}": value for key, value in stats.items()}
             wandb.log(stats, step=self.global_step)
+
+            self.global_step += 1
 
     def valid(self) -> None:
         """Run validation on all validation datasets."""
@@ -160,8 +172,10 @@ class DeepSpeedTrainer:
 
             with torch.no_grad():
                 for batch in iterator:
-                    _, stats = self.model_engine(**batch)
-                    assert all(isinstance(v, float) for v in stats.values())
+                    batch = to_device(batch, "cuda", dtype=self.dtype)
+                    out = self.model_engine(**batch)
+
+                    stats = {k: float(v) for k, v in out["stats"].items()}
                     for key, value in stats.items():
                         if key not in all_stats:
                             all_stats[key] = []
@@ -173,3 +187,19 @@ class DeepSpeedTrainer:
                 for key, value in all_stats.items()
             }
             wandb.log(all_stats, step=self.global_step)
+
+    def train_dtype(self, ds_config):
+        if "bf16" in ds_config:
+            dtype = torch.bfloat16
+        elif "fp16" in ds_config:
+            dtype = torch.float16
+        elif "amp" in ds_config:
+            if torch.cuda.is_bf16_supported():
+                dtype = torch.bfloat16
+            else:
+                dtype = torch.float16
+        else:
+            dtype = torch.float
+
+        logger.info(f"Convert all float input data to dtype={dtype}")
+        return dtype

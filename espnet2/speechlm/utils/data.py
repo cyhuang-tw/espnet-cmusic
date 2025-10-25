@@ -1,13 +1,13 @@
 """Data utilities for SpeechLM module."""
 
+import dataclasses
 import torch
 import numpy as np
 from typing import List, Union, Tuple
 
 
 def pad_list(
-    sequences: List[Union[np.ndarray, torch.Tensor]],
-    pad_value: float = 0.0
+    sequences: List[Union[np.ndarray, torch.Tensor]], pad_value: float = 0.0
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Pad a list of sequences to the same length and stack them.
 
@@ -73,7 +73,7 @@ def pad_list(
 
     # Fill sequences
     for i, t in enumerate(tensors):
-        padded[i, :lengths[i], ...] = t.to(
+        padded[i, : lengths[i], ...] = t.to(
             dtype=dtype, device=device, non_blocking=True
         )
 
@@ -81,3 +81,43 @@ def pad_list(
     length_tensor = torch.tensor(lengths, dtype=torch.long, device=device)
 
     return padded, length_tensor
+
+
+def to_device(data, device=None, dtype=None, non_blocking=False, copy=False):
+    """Change the device of object recursively"""
+    if isinstance(data, dict):
+        return {
+            k: to_device(v, device, dtype, non_blocking, copy) for k, v in data.items()
+        }
+    elif dataclasses.is_dataclass(data) and not isinstance(data, type):
+        return type(data)(
+            *[
+                to_device(v, device, dtype, non_blocking, copy)
+                for v in dataclasses.astuple(data)
+            ]
+        )
+    # maybe namedtuple. I don't know the correct way to judge namedtuple.
+    elif isinstance(data, tuple) and type(data) is not tuple:
+        return type(data)(
+            *[to_device(o, device, dtype, non_blocking, copy) for o in data]
+        )
+    elif isinstance(data, (list, tuple)):
+        return type(data)(to_device(v, device, dtype, non_blocking, copy) for v in data)
+    elif isinstance(data, np.ndarray):
+        return to_device(torch.from_numpy(data), device, dtype, non_blocking, copy)
+    elif isinstance(data, torch.Tensor):
+        if dtype is not None:
+            dtype = str(dtype).removeprefix("torch.")
+            cur_dtype = str(data.dtype).removeprefix("torch.")
+
+            if not (
+                ("int" in dtype and "int" in cur_dtype)
+                or ("float" in dtype and "float" in cur_dtype)
+            ):
+                dtype = None  # avoid conversion between int and float.
+            else:
+                dtype = getattr(torch, dtype)
+
+        return data.to(device, dtype, non_blocking, copy)
+    else:
+        return data

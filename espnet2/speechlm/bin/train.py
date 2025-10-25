@@ -28,8 +28,14 @@ def get_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Distributed training (handled by DeepSpeed launcher via env vars)
-    # No arguments needed - DeepSpeed sets LOCAL_RANK, RANK, etc.
+    # Distributed training
+    dist_group = parser.add_argument_group("Distributed Training")
+    dist_group.add_argument(
+        "--local_rank",
+        type=int,
+        default=None,
+        help="Local rank for distributed training (set by launcher)",
+    )
 
     # Training configuration
     train_group = parser.add_argument_group("Training Configuration")
@@ -108,7 +114,9 @@ def get_parser() -> argparse.ArgumentParser:
     )
 
     # Wandb configuration (mandatory local/offline logging)
-    wandb_group = parser.add_argument_group("Weights & Biases (Mandatory Local Logging)")
+    wandb_group = parser.add_argument_group(
+        "Weights & Biases (Mandatory Local Logging)"
+    )
     wandb_group.add_argument(
         "--wandb-name",
         type=str,
@@ -131,9 +139,7 @@ def main():
     args = parser.parse_args()
 
     # (1) Setup distributed training first to get rank info
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
-    torch.cuda.set_device(local_rank)
-
+    torch.cuda.set_device(args.local_rank)
     deepspeed.init_distributed()
 
     assert torch.distributed.is_initialized()
@@ -166,15 +172,15 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # (3) Initialize job template
-    with open(args.train_config, 'r') as f:
+    with open(args.train_config, "r") as f:
         train_config = yaml.safe_load(f)
     logger.info(f"Loaded training config from: {args.train_config}")
 
-    job_template_class = _all_job_types[train_config['job_type']]
+    job_template_class = _all_job_types[train_config["job_type"]]
     job_template = job_template_class(train_config)
 
     # (4) build data iterator factory
-    loading_config = train_config['data_loading']
+    loading_config = train_config["data_loading"]
     preprocessor = job_template.build_preprocessor()
 
     # Ensure loader_state directory exists
@@ -187,30 +193,32 @@ def main():
         stats_dir=args.stats_dir,
         loader_state=loader_state_dir / "train.json",
         collate_fn=preprocessor.collate_fn,
-        batchfy_method=loading_config['batchfy_method'],
-        batch_size=loading_config['batch_size'],
-        num_workers=loading_config['num_workers'],
+        batchfy_method=loading_config["batchfy_method"],
+        batch_size=loading_config["batch_size"],
+        num_workers=loading_config["num_workers"],
         rank=rank,
         world_size=world_size,
         shuffle=True,
-        seed=loading_config['seed'],
+        seed=loading_config["seed"],
     )
-    
+
     valid_iterator_factories = dict()
     valid_iterator_args = dict(
         stats_dir=args.stats_dir,
         loader_state=loader_state_dir / "valid.json",
         collate_fn=preprocessor.collate_fn,
-        batchfy_method=loading_config['batchfy_method'],
-        batch_size=loading_config['batch_size'],
-        num_workers=loading_config['num_workers'],
+        batchfy_method=loading_config["batchfy_method"],
+        batch_size=loading_config["batch_size"],
+        num_workers=loading_config["num_workers"],
         rank=rank,
         world_size=world_size,
         shuffle=False,
     )
 
     for spec in args.valid_unregistered_specifier.split():
-        factory = DataIteratorFactory(unregistered_specifier=spec, **valid_iterator_args)
+        factory = DataIteratorFactory(
+            unregistered_specifier=spec, **valid_iterator_args
+        )
         valid_iterator_factories[spec] = factory
     for spec in args.valid_registered_specifier.split():
         factory = DataIteratorFactory(registered_specifier=spec, **valid_iterator_args)
@@ -229,8 +237,8 @@ def main():
             "train_config": train_config,
         }
         wandb.init(
-            mode='offline',
-            project='local',
+            mode="offline",
+            project="local",
             name=wandb_name,
             config=wandb_argument_record,
             tags=args.wandb_tags,
@@ -248,9 +256,10 @@ def main():
         model=model,
         resume_path=args.resume_path,
         output_dir=args.output_dir,
-        trainer_args=train_config['trainer'],
+        trainer_args=train_config["trainer"],
     )
     trainer.run()
+
 
 if __name__ == "__main__":
     main()

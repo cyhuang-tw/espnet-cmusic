@@ -8,10 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from torch.utils.data import DataLoader
 
-from espnet2.speechlm.dataloader.batch import (
-    batchfy,
-    synchronize_batches,
-)
+from espnet2.speechlm.dataloader.batch import batchfy
 from espnet2.speechlm.dataloader.dataset import CombinedDataset
 
 T = TypeVar("T")
@@ -156,9 +153,7 @@ class DataIteratorFactory:
                 stat_dict = _load_stats(stat_file, task, data_name)
                 # Only keep stats for the examples we're using
                 filtered_stats = {
-                    key: stat_dict[key]
-                    for key in data_list
-                    if key in stat_dict
+                    key: stat_dict[key] for key in data_list if key in stat_dict
                 }
                 all_lengths.update(filtered_stats)
                 logging.info(f"Task={task}, data_name={data_name}, factor={factor}")
@@ -167,15 +162,8 @@ class DataIteratorFactory:
             batched_examples = batchfy(
                 all_examples, all_lengths, batch_size, batchfy_method
             )
-            logging.info(f"Overall number of batches: {len(batched_examples)}")
-
-            # (5) Synchronize batches across GPU ranks
-            batched_examples = synchronize_batches(batched_examples)
-            logging.info(
-                f"Number of batches after synchronization: {len(batched_examples)}"
-            )
-
             self.batched_examples = batched_examples
+            logging.info(f"Overall number of batches: {len(batched_examples)}")
             # TODO: save this state for later usage.
 
         else:

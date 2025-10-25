@@ -27,9 +27,7 @@ class HuggingFaceTextIO(AbsIO):
         self.tokenizer_name = tokenizer_name
 
         # Get the actual vocabulary size from model config
-        self.vocab_size = AutoConfig.from_pretrained(
-            tokenizer_name
-        ).vocab_size
+        self.vocab_size = AutoConfig.from_pretrained(tokenizer_name).vocab_size
 
     def preprocess(self, data: str) -> Dict[str, np.ndarray]:
         """Tokenize single text string for data loading.
@@ -42,9 +40,7 @@ class HuggingFaceTextIO(AbsIO):
         """
         # Use same tokenization as find_length for consistency
         token_ids = self.tokenizer.encode(
-            data,
-            truncation=True,
-            add_special_tokens=True
+            data, truncation=True, add_special_tokens=True
         )
 
         tokens = np.array(token_ids, dtype=np.int32).reshape(-1, 1)
@@ -64,9 +60,7 @@ class HuggingFaceTextIO(AbsIO):
         """
         # Ensure 1D array
         if tokens.ndim != 1:
-            raise ValueError(
-                f"Expected 1D tensor, got shape {tokens.shape}"
-            )
+            raise ValueError(f"Expected 1D tensor, got shape {tokens.shape}")
 
         # Convert numpy array to list and decode
         text = self.tokenizer.decode(
@@ -86,9 +80,7 @@ class HuggingFaceTextIO(AbsIO):
             Number of tokens after tokenization
         """
         token_ids = self.tokenizer.encode(
-            data,
-            truncation=True,
-            add_special_tokens=True
+            data, truncation=True, add_special_tokens=True
         )
         return len(token_ids)
 

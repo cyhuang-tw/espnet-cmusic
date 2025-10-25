@@ -53,7 +53,7 @@ def get_parser() -> argparse.ArgumentParser:
                 type=str,
                 default="",
                 help=f"{spec_type.capitalize()} {split} data specifier. "
-                     f"Format: '{format_str}' (e.g., '{example}')",
+                f"Format: '{format_str}' (e.g., '{example}')",
             )
 
     # Processing options
@@ -81,8 +81,11 @@ def get_parser() -> argparse.ArgumentParser:
 
 
 def worker(
-    preprocessor, rank: int, world_size: int,
-    unregistered_spec: str = "", registered_spec: str = ""
+    preprocessor,
+    rank: int,
+    world_size: int,
+    unregistered_spec: str = "",
+    registered_spec: str = "",
 ):
     """Worker function to collect length statistics for a data shard."""
     # Create iterator with appropriate specifier
@@ -94,7 +97,7 @@ def worker(
         shuffle=False,
         sequential_load=True,
         num_workers=0,
-        collate_fn=lambda x: x[0]
+        collate_fn=lambda x: x[0],
     ).get_iterator()
 
     # Collect statistics for this shard
@@ -129,9 +132,7 @@ def collect_length_stats(
     with Pool(num_workers) as pool:
         results = [
             pool.apply_async(
-                worker,
-                args=(preprocessor, rank, num_workers),
-                kwds=kwargs
+                worker, args=(preprocessor, rank, num_workers), kwds=kwargs
             )
             for rank in range(num_workers)
         ]
@@ -143,16 +144,17 @@ def collect_length_stats(
 
     return aggregated_stats
 
+
 def save_stats(stats: Dict[Tuple[str, ...], int], output_file: Path) -> None:
     """Save statistics dictionary to JSONL file."""
     logger = logging.getLogger(__name__)
 
     # Save to JSONL format
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         for key_tuple, value in stats.items():
             # Only keep the example_id, and discard the task and data_name
             json_obj = {key_tuple[2]: value}
-            f.write(json.dumps(json_obj) + '\n')
+            f.write(json.dumps(json_obj) + "\n")
 
     # Log summary
     if stats:
@@ -184,7 +186,7 @@ def main():
     with open(args.train_config) as f:
         config = yaml.safe_load(f)
 
-    job_template = _all_job_types[config['job_type']](config)
+    job_template = _all_job_types[config["job_type"]](config)
     preprocessor = job_template.build_preprocessor()
 
     # Collect all specifiers to process

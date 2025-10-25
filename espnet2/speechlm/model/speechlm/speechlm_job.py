@@ -13,7 +13,10 @@ from espnet2.speechlm.model.speechlm.task_conf_speechlm import SPEECHLM_TASK_CON
 # Multimodal IOs
 from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
 from espnet2.speechlm.model.speechlm.multimodal_io.text import HuggingFaceTextIO
-from espnet2.speechlm.model.speechlm.multimodal_io.audio import DiscreteAudioIO, ContinuousAudioIO
+from espnet2.speechlm.model.speechlm.multimodal_io.audio import (
+    DiscreteAudioIO,
+    ContinuousAudioIO,
+)
 
 # Main speechlm model
 from espnet2.speechlm.model.speechlm.lm.parallel import ParallelHFModel
@@ -26,9 +29,8 @@ _multimodal_ios = {
     "continuous_audio": ContinuousAudioIO,
 }
 
-_lms = {
-    "parallel": ParallelHFModel
-}
+_lms = {"parallel": ParallelHFModel}
+
 
 class SpeechLMJobTemplate(AbsJobTemplate):
     """Job template for SpeechLM training tasks.
@@ -47,22 +49,20 @@ class SpeechLMJobTemplate(AbsJobTemplate):
 
         # (1) keep other configs
         self.config = config
-        
+
         # (2) build tokenizers and vocabulary
-        io_config = config['multimodal_io']
+        io_config = config["multimodal_io"]
         self.multimodal_io = dict()
         for io_name, io_config in io_config.items():
             multimodal_io_class = _multimodal_ios[io_name]
             assert issubclass(multimodal_io_class, AbsIO)
             self.multimodal_io[io_name] = multimodal_io_class(**io_config)
-        
-        self.vocab, self.vocab_interval = self._build_vocabulary()
+
+        self.vocab, self.vocab_intervals = self._build_vocabulary()
 
     def _build_vocabulary(self, num_special_tokens=256):
         # (1) Initial special token. We keep a fixed number of slots
-        vocab_interval = {
-            "special_token": (0, num_special_tokens)
-        }
+        vocab_intervals = {"special_token": [(0, num_special_tokens)]}
         vocab = [
             "<|pad|>",
             "<|bos|>",
@@ -78,19 +78,21 @@ class SpeechLMJobTemplate(AbsJobTemplate):
         ]
         while len(vocab) < num_special_tokens:
             vocab.append(f"<|unused_{len(vocab)}|>")
-        
+
         # (2) add vocabulary from each discrete multimodal IO.
         start = num_special_tokens
         for io_name, io in self.multimodal_io.items():
             if io.is_discrete:
                 vocab.extend(io.get_vocabulary())
-                vocab_interval[io_name] = (start, len(vocab))
+                vocab_intervals[io_name] = [
+                    (start + this_start, start + this_end)
+                    for this_start, this_end in io.get_stream_interval()
+                ]
                 start = len(vocab)
 
         assert len(vocab) == len(set(vocab)), "There are duplicated tokens in the vocab"
 
-        return vocab, vocab_interval
-        
+        return vocab, vocab_intervals
 
     def build_preprocessor(self) -> Callable:
         """Build the data collation function for SpeechLM.
@@ -99,18 +101,17 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             A callable function for collating SpeechLM batch data.
         """
 
-        processor_config = self.config['preprocessor']
+        processor_config = self.config["preprocessor"]
         multimodal_io = {
-            io_name: io.copy_for_worker()
-            for io_name, io in self.multimodal_io.items()
+            io_name: io.copy_for_worker() for io_name, io in self.multimodal_io.items()
         }
         return SpeechLMPreprocessor(
             multimodal_io=multimodal_io,
             vocab=self.vocab,
-            vocab_interval=self.vocab_interval,
-            audio_input=processor_config['audio_input'],
-            audio_output=processor_config['audio_output'],
-            loss_region=processor_config['loss_region'],
+            vocab_intervals=self.vocab_intervals,
+            audio_input=processor_config["audio_input"],
+            audio_output=processor_config["audio_output"],
+            loss_region=processor_config["loss_region"],
             batchfy_method=self.config["data_loading"].get("batchfy_method", "bucket"),
         )
 
@@ -121,19 +122,19 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             A SpeechLM model instance.
         """
 
-        model_config = self.config['model']
-        model_class = _lms[model_config['model_choice']]
+        model_config = self.config["model"]
+        model_class = _lms[model_config["model_choice"]]
 
         model = model_class(
-            model_hf_tag=model_config['model_hf_tag'],
+            model_hf_tag=model_config["model_hf_tag"],
             multimodal_io=self.multimodal_io,
-            vocab_interval=self.vocab_interval,
-            **model_config['model_conf']
+            vocab_intervals=self.vocab_intervals,
+            **model_config["model_conf"],
         )
 
-        if model_config.get('activation_checkpointing', False):
+        if model_config.get("activation_checkpointing", False):
             model.gradient_checkpointing_enable()
-        
+
         return model
 
 
@@ -142,13 +143,13 @@ class SpeechLMPreprocessor:
         self,
         multimodal_io,
         vocab,
-        vocab_interval,
+        vocab_intervals,
         audio_input: str = "continuous_audio",
         audio_output: str = "discrete_audio",
         loss_region: str = "assistant",
         batchfy_method: str = "bucket",
     ):
-        
+
         # (1) keep all multimodal_io
         self.multimodal_io = multimodal_io
         self.audio_input = audio_input
@@ -158,14 +159,12 @@ class SpeechLMPreprocessor:
 
         # (2) vocabulary
         self.vocab = vocab
-        self.vocab_interval = vocab_interval
+        self.vocab_intervals = vocab_intervals
         self.pad_id = self.vocab.index("<|pad|>")
-        self.num_stream = max([
-            io.num_stream() 
-            for io in multimodal_io.values()
-            if io.is_discrete
-        ])
-    
+        self.num_stream = max(
+            [io.num_stream() for io in multimodal_io.values() if io.is_discrete]
+        )
+
     def find_length(self, key, data_dict):
         task, _, _ = key
         messages = self._apply_chat_template(task, data_dict)
@@ -177,24 +176,20 @@ class SpeechLMPreprocessor:
         for _, this_io, this_data in messages:
             length += 3
             length += self.multimodal_io[this_io].find_length(this_data)
-        
+
         return length
 
     def collate_fn(self, data_lst):
-        data_dicts = [
-            self.preprocessing(key, data_dict)
-            for key, data_dict in data_lst
-        ]
-        
+        data_dicts = [self.preprocessing(key, data_dict) for key, data_dict in data_lst]
+
         seqs, conti_feats, loss_masks = [], [], []
         for bidx, data_dict in enumerate(data_dicts):
-            seqs.append(data_dict['sequence'])
-            # conti_feats.append((bidx, data_dict['conti_feats']))
-            loss_masks.append(data_dict['loss_mask'])
+            seqs.append(data_dict["sequence"])
+            loss_masks.append(data_dict["loss_mask"])
 
-            for conti_feat in data_dict['conti_feats']:
-                conti_feats.append((bidx, ) + conti_feat)
-        
+            for conti_feat in data_dict["conti_feats"]:
+                conti_feats.append((bidx,) + conti_feat)
+
         seqs, _ = pad_list(seqs)
         loss_masks, _ = pad_list(loss_masks)
 
@@ -206,17 +201,12 @@ class SpeechLMPreprocessor:
                 conti_feats_dict[this_io] = [[], []]
             conti_feats_dict[this_io][0].append((bidx, start, length))
             conti_feats_dict[this_io][1].append(feat)
-        
-        for io_dict in conti_feats_dict.values():
-            max_length = max(c[2] for c in io_dict[0])
-            io_dict[1], _ = pad_list(io_dict[1])
-            io_dict[1] = torch.Tensor(io_dict[1])[:, :max_length]
-            print('after trunkcing: ', io_dict[1].size())
 
-        seqs = torch.Tensor(seqs).long()
-        loss_mask = torch.Tensor(loss_masks).float()
+        for io_dict in conti_feats_dict.values():
+            io_dict[1] = pad_list(io_dict[1])
+
         keys = [key for key, _ in data_lst]
-        
+
         if self.batchfy_method == "pack":
             raise NotImplementedError("Pack sequence is not implemented yet.")
 
@@ -224,9 +214,9 @@ class SpeechLMPreprocessor:
             "key": keys,
             "seqs": seqs,
             "conti_feats": conti_feats_dict,
-            "loss_masks": loss_mask
+            "loss_masks": loss_masks,
         }
-    
+
     def preprocessing(self, key, data_dict):
         # (1) convert to messages
         task, _, _ = key
@@ -240,8 +230,7 @@ class SpeechLMPreprocessor:
 
         # (3) loop on each message
         apply_eots = [
-            msg1[0] == msg2[0]
-            for msg1, msg2 in zip(messages[:1], messages[1:])
+            msg1[0] == msg2[0] for msg1, msg2 in zip(messages[:1], messages[1:])
         ] + [False]
         for apply_eot, (role, this_io, this_data) in zip(apply_eots, messages):
             apply_loss = float(role == "assistant" or self.loss_region == "all")
@@ -256,14 +245,16 @@ class SpeechLMPreprocessor:
             loss_masks.append(special_mask)
 
             accum_length += 2
-            
+
             # (3.2) the exact data processing
-            this_seq, conti_feat, loss_mask = self.multimodal_io[this_io].preprocess(this_data)
+            this_seq, conti_feat, loss_mask = self.multimodal_io[this_io].preprocess(
+                this_data
+            )
             assert this_seq.shape == loss_mask.shape
 
             # (3.3) this_seq
             if self.multimodal_io[this_io].is_discrete:
-                modality_bias = self.vocab_interval[this_io][0]
+                modality_bias = self.vocab_intervals[this_io][0][0]
                 this_seq = np.where(this_seq == 0, this_seq, this_seq + modality_bias)
             if this_seq.shape[1] < self.num_stream:
                 pad_size = self.num_stream - this_seq.shape[1]
@@ -274,7 +265,7 @@ class SpeechLMPreprocessor:
             if conti_feat is not None:
                 length, feat = conti_feat
                 conti_feats.append((this_io, accum_length, length, feat))
-            
+
             # (3.5) loss_mask
             if loss_mask.shape[1] < self.num_stream:
                 pad_size = self.num_stream - loss_mask.shape[1]
@@ -303,19 +294,21 @@ class SpeechLMPreprocessor:
         }
 
         return data
-    
+
     def diagnose(self, data):
-        seq = data['sequence']
-        loss_mask = data['loss_mask']
-        conti_feats = data['conti_feats']
+        seq = data["sequence"]
+        loss_mask = data["loss_mask"]
+        conti_feats = data["conti_feats"]
 
         for i, (s, m) in enumerate(zip(seq, loss_mask)):
             s = [self.vocab[s] for s in s.tolist()]
             m = m.tolist()
             print(f"Frame {i} | token: {s} | weight: {m}")
-        
+
         for this_io, conti_start, length, feat in conti_feats:
-            print(f"Conti feats: modality={this_io}, conti_feat={conti_start}, length={length}, feat={feat.shape}")
+            print(
+                f"Conti feats: modality={this_io}, conti_feat={conti_start}, length={length}, feat={feat.shape}"
+            )
 
     def special_mask(self, value):
         retval = np.zeros((1, self.num_stream)).astype(np.float32)
@@ -323,18 +316,20 @@ class SpeechLMPreprocessor:
         return retval
 
     def special_token(self, token):
-        num_special_token = self.vocab_interval['special_token'][1]
+        num_special_token = self.vocab_intervals["special_token"][0][1]
         special_tokens = self.vocab[:num_special_token]
         token_id = special_tokens.index(token)
         retval = np.ones((1, self.num_stream)).astype(np.int64) * self.pad_id
         retval[0, 0] = token_id
         return retval
-    
+
     def _apply_chat_template(self, task, data_dict):
         if "dialogue" in data_dict:
             if len(data_dict) != 1:
-                raise ValueError("If dialogue exist, there should be no more other entries")
-            return data_dict['dialogue']
+                raise ValueError(
+                    "If dialogue exist, there should be no more other entries"
+                )
+            return data_dict["dialogue"]
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()
@@ -348,15 +343,16 @@ class SpeechLMPreprocessor:
                     this_io = "text"
                 else:
                     raise ValueError(f"Not supported data entry in template: {entry}")
-                
+
                 this_data = data_dict[entry]
                 message = (role, this_io, this_data)
                 messages.append(message)
             return messages
 
+
 if __name__ == "__main__":
     config = "test.yaml"
-    with open(config, 'r') as f:
+    with open(config, "r") as f:
         config = yaml.safe_load(f)
         print(config)
         template = SpeechLMJobTemplate(config)
