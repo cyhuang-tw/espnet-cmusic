@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from torch.utils.data import DataLoader
 
 from espnet2.speechlm.dataloader.batch import batchfy
+from espnet2.speechlm.dataloader.task_conf import TASK_CONFIGS
 from espnet2.speechlm.dataloader.dataset import CombinedDataset
 
 T = TypeVar("T")
@@ -94,11 +95,11 @@ class DataIteratorFactory:
 
         # (2) build dataset
         # Extract (name, data_json) tuples for unregistered datasets
-        dataset_unregistered = set(
-            (name, data_json) for _, name, data_json, _ in cache_unregistered
+        dataset_unregistered = list(
+            set((name, data_json) for _, name, data_json, _ in cache_unregistered)
         )
         # Extract (name,) tuples for registered datasets
-        dataset_registered = set(name for _, name, _ in cache_registered)
+        dataset_registered = list(set(name for _, name, _ in cache_registered))
         logging.info(
             f"Building dataset with unregistered={dataset_unregistered}, "
             f"registered={dataset_registered}"
@@ -122,6 +123,9 @@ class DataIteratorFactory:
                 # Unregistered: (task, name, data_json, factor)
                 task = entry[0]
                 data_name = entry[1]
+
+                required_entries = TASK_CONFIGS[task]["required_entries"]
+                dataset.verify_subset_entries(task, data_name, required_entries)
 
                 data_list = all_subsets[data_name]
                 data_list = [(task, data_name, example_id) for example_id in data_list]
@@ -164,10 +168,9 @@ class DataIteratorFactory:
             )
             self.batched_examples = batched_examples
             logging.info(f"Overall number of batches: {len(batched_examples)}")
-            # TODO: save this state for later usage.
 
+            self.save_iterator_state(loader_state)
         else:
-            # Load batched_examples from saved state
             self.load_iterator_state(loader_state)
 
     def get_iterator(self, global_step: int = 0, length: int = None) -> DataLoader:
@@ -242,35 +245,49 @@ class DataIteratorFactory:
 
         return dataloader
 
-    def iterator_state(self) -> Dict:
-        """Get the current state of the iterator.
-
-        Returns:
-            Dictionary containing iterator state with key:
-            - batched_examples: List of batches
-        """
-        state = {
-            "batched_examples": self.batched_examples,
-        }
-        logging.info(f"Saved iterator state with {len(self.batched_examples)} batches")
-        return state
-
-    def load_iterator_state(self, state_dict: Dict):
-        """Load iterator state from a dictionary.
+    def save_iterator_state(self, loader_state: str):
+        """Save the current state of the iterator to a file.
 
         Args:
-            state_dict: Dictionary containing iterator state.
-                Required key: batched_examples
+            loader_state: Path to save the iterator state file
+        """
+        # Save as JSON (nested tuples will be converted to lists)
+        state = {"batched_examples": self.batched_examples}
+
+        with open(loader_state, "w") as f:
+            json.dump(state, f)
+
+        logging.info(
+            f"Saved iterator state to {loader_state} "
+            f"with {len(self.batched_examples)} batches"
+        )
+
+    def load_iterator_state(self, loader_state: str):
+        """Load iterator state from a file.
+
+        Args:
+            loader_state: Path to the iterator state file
 
         Raises:
-            KeyError: If 'batched_examples' key is missing.
+            FileNotFoundError: If the state file doesn't exist
+            KeyError: If required keys are missing in the state file
         """
-        if "batched_examples" not in state_dict:
-            raise KeyError("state_dict must contain 'batched_examples' key")
+        with open(loader_state, "r") as f:
+            state = json.load(f)
 
-        self.batched_examples = state_dict["batched_examples"]
+        if "batched_examples" not in state:
+            raise KeyError("State file must contain 'batched_examples' key")
 
-        logging.info(f"Loaded iterator state with {len(self.batched_examples)} batches")
+        # Convert nested lists back to proper structure:
+        # Each batch is a list of tuples (converted from lists by JSON)
+        self.batched_examples = [
+            [tuple(example) for example in batch] for batch in state["batched_examples"]
+        ]
+
+        logging.info(
+            f"Loaded iterator state from {loader_state} "
+            f"with {len(self.batched_examples)} batches"
+        )
 
 
 def _parse_data_specifier(

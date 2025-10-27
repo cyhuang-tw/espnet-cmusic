@@ -191,7 +191,7 @@ def main():
         args.train_unregistered_specifier,
         args.train_registered_specifier,
         stats_dir=args.stats_dir,
-        loader_state=loader_state_dir / "train.json",
+        loader_state=loader_state_dir / f"train_{rank}_{world_size}.json",
         collate_fn=preprocessor.collate_fn,
         batchfy_method=loading_config["batchfy_method"],
         batch_size=loading_config["batch_size"],
