@@ -150,7 +150,7 @@ class DeepSpeedTrainer:
             self.model_engine.backward(out["loss"])
             self.model_engine.step()
 
-            # TODO: sync the stats across GPUs before logging
+            # TODO(deepspeed): sync the stats across GPUs before logging
             stats = {k: float(v) for k, v in out["stats"].items()}
             stats = {f"train/{key}": value for key, value in stats.items()}
             wandb.log(stats, step=self.global_step)

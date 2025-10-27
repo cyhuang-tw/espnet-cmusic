@@ -2,7 +2,6 @@
 """SpeechLM job template for training configuration."""
 
 from typing import Any, Callable, Dict
-import yaml
 import re
 import torch
 import numpy as np
@@ -306,9 +305,9 @@ class SpeechLMPreprocessor:
 
             # (3.6) <eot> or <eos>
             if apply_eot:
-                seq.append(self.special_token(f"<|eot|>"))
+                seq.append(self.special_token("<|eot|>"))
             else:
-                seq.append(self.special_token(f"<|eos|>"))
+                seq.append(self.special_token("<|eos|>"))
             loss_masks.append(special_mask)
             accum_length += 1
 
@@ -316,7 +315,7 @@ class SpeechLMPreprocessor:
         seq = np.concatenate(seq, axis=0)
         loss_mask = np.concatenate(loss_masks, axis=0)
 
-        # TODO: Add CFG here
+        # TODO(speechlm): Add CFG here
         data = {
             "sequence": seq,
             "conti_feats": conti_feats,
@@ -341,7 +340,8 @@ class SpeechLMPreprocessor:
 
         for this_io, conti_start, length, feat in conti_feats:
             print(
-                f"Conti feats: modality={this_io}, conti_feat={conti_start}, length={length}, feat={feat.shape}"
+                f"Conti feats: modality={this_io}, conti_feat={conti_start}, "
+                f"length={length}, feat={feat.shape}"
             )
 
     def special_mask(self, value):

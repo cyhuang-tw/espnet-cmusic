@@ -1,9 +1,8 @@
 """Audio I/O implementation for discrete and continuous representations (v2)."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 import numpy as np
 import torch
-import torch.nn as nn
 import joblib
 from pathlib import Path
 
@@ -81,13 +80,16 @@ class DiscreteAudioIO(AbsIO):
         Args:
             codec_choice: Type of codec to use ("ESPnet" or None to disable)
             codec_hf_model_tag: HuggingFace model tag for codec tokenizer
-            codec_max_token_per_frame: Maximum number of codec tokens per frame (default: 8)
+            codec_max_token_per_frame: Maximum number of codec tokens per frame
+                (default: 8)
             ssl_choice: Type of SSL model to use ("ESPnet" or None to disable)
-            ssl_hf_model_tag: HuggingFace model tag for SSL model (e.g., "espnet/xeus")
+            ssl_hf_model_tag: HuggingFace model tag for SSL model
+                (e.g., "espnet/xeus")
             stream_weights: Loss weights for each stream. List of weight values,
-                          one for each stream. Order should be [SSL streams, codec streams].
-                          If None, all streams get equal weight (1.0).
-            delay_interleave: Whether to apply delay interleaving to multi-stream tokens (default: False)
+                one for each stream. Order should be [SSL streams, codec streams].
+                If None, all streams get equal weight (1.0).
+            delay_interleave: Whether to apply delay interleaving to multi-stream
+                tokens (default: False)
             device: Device to run models on (default: "cpu")
         """
         # Initialize parent class (AbsIO which inherits from both ABC and Module)
@@ -197,7 +199,8 @@ class DiscreteAudioIO(AbsIO):
         elif ssl_choice == "ESPnet":
             if ssl_hf_model_tag != "espnet/xeus":
                 raise NotImplementedError(
-                    f"Currently only support XEUS model ('espnet/xeus'), got '{ssl_hf_model_tag}'"
+                    f"Currently only support XEUS model ('espnet/xeus'), "
+                    f"got '{ssl_hf_model_tag}'"
                 )
 
             # Download and extract model from ESPnet model zoo
@@ -225,7 +228,8 @@ class DiscreteAudioIO(AbsIO):
             self.km_model = KmeansModel(ssl_kmeans_path, device=self.device)
 
             # Extract SSL metadata
-            # NOTE: Cannot parse the metadata from hubert_train_args, using hardcoded values for XEUS
+            # NOTE: Cannot parse the metadata from hubert_train_args,
+            # using hardcoded values for XEUS
             self.ssl_n_streams = 1
             # SSL uses single vocabulary, stored as list for consistency
             self.ssl_vocab_size = [self.km_model.C.size(1)]
@@ -256,14 +260,16 @@ class DiscreteAudioIO(AbsIO):
             if self.codec_frame_shift != self.ssl_frame_shift:
                 raise ValueError(
                     f"Frame shifts must match when using both tokenizers: "
-                    f"codec={self.codec_frame_shift} samples, ssl={self.ssl_frame_shift} samples"
+                    f"codec={self.codec_frame_shift} samples, "
+                    f"ssl={self.ssl_frame_shift} samples"
                 )
 
             # Check frames per second matches
             if self.codec_frame_per_second != self.ssl_frame_per_second:
                 raise ValueError(
                     f"Frames per second must match when using both tokenizers: "
-                    f"codec={self.codec_frame_per_second} fps, ssl={self.ssl_frame_per_second} fps"
+                    f"codec={self.codec_frame_per_second} fps, "
+                    f"ssl={self.ssl_frame_per_second} fps"
                 )
 
             # Set combined values from either tokenizer (they're the same)
@@ -284,7 +290,8 @@ class DiscreteAudioIO(AbsIO):
             self.frame_per_second = self.ssl_frame_per_second
 
         else:
-            # This should never happen due to earlier check, but include for completeness
+            # This should never happen due to earlier check,
+            # but include for completeness
             raise ValueError("At least one tokenizer must be configured")
 
         # Validate and process stream weights
@@ -298,7 +305,8 @@ class DiscreteAudioIO(AbsIO):
                 raise ValueError(
                     f"Number of weights ({len(self.stream_weights)}) must match "
                     f"number of streams ({total_streams}). "
-                    f"Expected: {self.ssl_n_streams} SSL + {self.codec_n_streams} codec weights"
+                    f"Expected: {self.ssl_n_streams} SSL + "
+                    f"{self.codec_n_streams} codec weights"
                 )
             if any(w <= 0 for w in self.stream_weights):
                 raise ValueError("All weights must be positive values")
@@ -491,7 +499,8 @@ class DiscreteAudioIO(AbsIO):
                 - audio_lengths: Sample lengths tensor of shape [batch]
         """
         if self.codec_choice == "ESPnet":
-            # Permute from [batch, time, codec_n_streams] to [codec_n_streams, batch, time]
+            # Permute from [batch, time, codec_n_streams]
+            # to [codec_n_streams, batch, time]
             codes = codes.permute(2, 0, 1)
 
             # Decode using codec model
@@ -558,7 +567,8 @@ class DiscreteAudioIO(AbsIO):
             data_trimmed = data[:, :, :max_len]
 
             codes = self.codec_model.encode(data_trimmed)
-            # Permute from [codec_n_streams, batch, time] to [batch, time, codec_n_streams]
+            # Permute from [codec_n_streams, batch, time]
+            # to [batch, time, codec_n_streams]
             codes = codes.permute(1, 2, 0)[:, :, : self.codec_n_streams]
 
         else:

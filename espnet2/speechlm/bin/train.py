@@ -166,7 +166,7 @@ def main():
     )
     logger = logging.getLogger(__name__)
 
-    logger.info(f"Distributed training initialized")
+    logger.info("Distributed training initialized")
     logger.info(f"World size: {world_size}")
     logger.info(f"Output directory: {args.output_dir}")
 

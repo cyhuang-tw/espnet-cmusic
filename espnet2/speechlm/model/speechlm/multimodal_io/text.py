@@ -1,6 +1,6 @@
 """HuggingFace tokenizer-based text I/O implementation"""
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 from transformers import AutoTokenizer, AutoConfig

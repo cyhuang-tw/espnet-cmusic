@@ -105,8 +105,8 @@ def build_parallel_hf_class(model_hf_tag):
                     # Validate text vocabulary size matches pretrained model
                     if text_end - text_start != orig_vocab_size:
                         raise ValueError(
-                            f"text_end - text_start ({text_end - text_start}) must equal "
-                            f"original vocab size ({orig_vocab_size})"
+                            f"text_end - text_start ({text_end - text_start}) "
+                            f"must equal original vocab size ({orig_vocab_size})"
                         )
 
                     # Copy pretrained weights to corresponding positions
