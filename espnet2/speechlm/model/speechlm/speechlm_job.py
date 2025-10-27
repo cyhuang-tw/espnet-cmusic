@@ -53,14 +53,19 @@ class SpeechLMJobTemplate(AbsJobTemplate):
         # (2) build tokenizers and vocabulary
         io_config = config["multimodal_io"]
         self.multimodal_io = dict()
-        for io_name, io_config in io_config.items():
+        for io_name, io_kwargs in io_config.items():
             multimodal_io_class = _multimodal_ios[io_name]
             assert issubclass(multimodal_io_class, AbsIO)
-            self.multimodal_io[io_name] = multimodal_io_class(**io_config)
+            self.multimodal_io[io_name] = multimodal_io_class(**io_kwargs)
 
         self.vocab, self.vocab_intervals = self._build_vocabulary()
 
     def _build_vocabulary(self, num_special_tokens=256):
+        """Build unified vocabulary from special tokens and multimodal IOs.
+
+        Reserves fixed slots for special tokens then adds tokens from discrete IOs.
+        Returns vocabulary list and interval mappings for each modality.
+        """
         # (1) Initial special token. We keep a fixed number of slots
         vocab_intervals = {"special_token": [(0, num_special_tokens)]}
         vocab = [
@@ -74,6 +79,7 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             "<|text|>",
             "<|audio|>",
             "<|image|>",
+            "<|video|>",
             "<|toolcall|>",
         ]
         while len(vocab) < num_special_tokens:
@@ -139,6 +145,12 @@ class SpeechLMJobTemplate(AbsJobTemplate):
 
 
 class SpeechLMPreprocessor:
+    """Preprocessor for SpeechLM data handling.
+
+    Converts raw data into model-ready format with tokenization,
+    padding, and loss mask generation for multimodal sequences.
+    """
+
     def __init__(
         self,
         multimodal_io,
@@ -166,6 +178,11 @@ class SpeechLMPreprocessor:
         )
 
     def find_length(self, key, data_dict):
+        """Quickly compute sequence length without full preprocessing.
+
+        Counts tokens for BOS, role/modality markers, content, and EOS/EOT.
+        Used for efficient batch construction.
+        """
         task, _, _ = key
         messages = self._apply_chat_template(task, data_dict)
 
@@ -180,6 +197,14 @@ class SpeechLMPreprocessor:
         return length
 
     def collate_fn(self, data_lst):
+        """Batch multiple samples for training.
+
+        Processes each sample, pads sequences to same length, and organizes
+        continuous features by modality. Returns dict ready for model forward.
+        """
+        if self.batchfy_method != "bucket":
+            raise NotImplementedError("Only bucket collate function is implemented")
+
         data_dicts = [self.preprocessing(key, data_dict) for key, data_dict in data_lst]
 
         seqs, conti_feats, loss_masks = [], [], []
@@ -194,8 +219,6 @@ class SpeechLMPreprocessor:
         loss_masks, _ = pad_list(loss_masks)
 
         conti_feats_dict = dict()
-        bidx = conti_feats[0][0]
-        feat = conti_feats[0][1]
         for bidx, this_io, start, length, feat in conti_feats:
             if this_io not in conti_feats_dict:
                 conti_feats_dict[this_io] = [[], []]
@@ -207,9 +230,6 @@ class SpeechLMPreprocessor:
 
         keys = [key for key, _ in data_lst]
 
-        if self.batchfy_method == "pack":
-            raise NotImplementedError("Pack sequence is not implemented yet.")
-
         return {
             "key": keys,
             "seqs": seqs,
@@ -218,6 +238,11 @@ class SpeechLMPreprocessor:
         }
 
     def preprocessing(self, key, data_dict):
+        """Convert single raw data dict into training-ready format.
+
+        Applies chat template, tokenizes content, adds special tokens,
+        and creates loss masks. Returns dict with sequences and features.
+        """
         # (1) convert to messages
         task, _, _ = key
         messages = self._apply_chat_template(task, data_dict)
@@ -229,6 +254,7 @@ class SpeechLMPreprocessor:
         accum_length = 1
 
         # (3) loop on each message
+        # Determine where to place EOT tokens (when consecutive msgs have same role)
         apply_eots = [
             msg1[0] == msg2[0] for msg1, msg2 in zip(messages[:1], messages[1:])
         ] + [False]
@@ -252,10 +278,13 @@ class SpeechLMPreprocessor:
             )
             assert this_seq.shape == loss_mask.shape
 
-            # (3.3) this_seq
+            # (3.3) this_seq - adjust token IDs and pad to match stream count
             if self.multimodal_io[this_io].is_discrete:
                 modality_bias = self.vocab_intervals[this_io][0][0]
-                this_seq = np.where(this_seq == 0, this_seq, this_seq + modality_bias)
+                this_seq = np.where(
+                    this_seq == self.pad_id, self.pad_id, this_seq + modality_bias
+                )
+            # Pad to num_stream if current IO has fewer streams
             if this_seq.shape[1] < self.num_stream:
                 pad_size = self.num_stream - this_seq.shape[1]
                 this_seq = np.pad(this_seq, ((0, 0), (0, pad_size)))
@@ -266,7 +295,8 @@ class SpeechLMPreprocessor:
                 length, feat = conti_feat
                 conti_feats.append((this_io, accum_length, length, feat))
 
-            # (3.5) loss_mask
+            # (3.5) loss_mask - pad and apply based on role
+            # Pad loss mask to match num_stream dimensions
             if loss_mask.shape[1] < self.num_stream:
                 pad_size = self.num_stream - loss_mask.shape[1]
                 loss_mask = np.pad(loss_mask, ((0, 0), (0, pad_size)))
@@ -296,6 +326,10 @@ class SpeechLMPreprocessor:
         return data
 
     def diagnose(self, data):
+        """Print human-readable representation of processed data for debugging.
+
+        Shows tokens, loss masks, and continuous feature info frame by frame.
+        """
         seq = data["sequence"]
         loss_mask = data["loss_mask"]
         conti_feats = data["conti_feats"]
@@ -311,11 +345,19 @@ class SpeechLMPreprocessor:
             )
 
     def special_mask(self, value):
+        """Create loss mask for special tokens (1 frame, multi-stream).
+
+        Only first stream has the actual value, others are zero.
+        """
         retval = np.zeros((1, self.num_stream)).astype(np.float32)
         retval[0, 0] = value
         return retval
 
     def special_token(self, token):
+        """Convert special token string to multi-stream token array.
+
+        Places token ID in first stream, padding tokens in other streams.
+        """
         num_special_token = self.vocab_intervals["special_token"][0][1]
         special_tokens = self.vocab[:num_special_token]
         token_id = special_tokens.index(token)
@@ -324,6 +366,11 @@ class SpeechLMPreprocessor:
         return retval
 
     def _apply_chat_template(self, task, data_dict):
+        """Convert data dict to list of (role, io_type, data) messages.
+
+        Either uses provided dialogue or constructs from task template.
+        Determines appropriate IO type based on role and data entry name.
+        """
         if "dialogue" in data_dict:
             if len(data_dict) != 1:
                 raise ValueError(
@@ -334,10 +381,12 @@ class SpeechLMPreprocessor:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()
             for role, entry in task_config:
+                # Select IO type based on entry name and role
                 if bool(re.match(r"^audio", entry)):
+                    # User/system use input audio IO, assistant uses output audio IO
                     if role == "user" or role == "system":
                         this_io = self.audio_input
-                    elif role == "assistant":
+                    else:
                         this_io = self.audio_output
                 elif bool(re.match(r"^text", entry)):
                     this_io = "text"
@@ -348,12 +397,3 @@ class SpeechLMPreprocessor:
                 message = (role, this_io, this_data)
                 messages.append(message)
             return messages
-
-
-if __name__ == "__main__":
-    config = "test.yaml"
-    with open(config, "r") as f:
-        config = yaml.safe_load(f)
-        print(config)
-        template = SpeechLMJobTemplate(config)
-        template.build_model()

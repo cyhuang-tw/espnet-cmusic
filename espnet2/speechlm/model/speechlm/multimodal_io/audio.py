@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
+import torch.nn as nn
 import joblib
 from pathlib import Path
 
@@ -347,9 +348,7 @@ class DiscreteAudioIO(AbsIO):
         self.audio_pad = len(self.vocabulary) - 1
 
     @torch.no_grad()
-    def encode_batch(
-        self, data: torch.Tensor, lengths: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def encode_batch(self, data: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         """Encode a batch of audio data into discrete tokens.
 
         Args:
@@ -357,9 +356,7 @@ class DiscreteAudioIO(AbsIO):
             lengths: Effective sample lengths [batch]
 
         Returns:
-            Tuple of:
-                - codes: Encoded tokens [batch, time, n_streams]
-                - frame_lengths: Frame lengths [batch]
+            codes: Encoded tokens [batch, time, n_streams]
         """
 
         if data.dim() != 3:
@@ -371,8 +368,8 @@ class DiscreteAudioIO(AbsIO):
 
         # Calculate frame lengths and trim audio to frame boundaries
         frame_lengths = lengths // self.frame_shift
-        lengths = frame_lengths * self.frame_shift
-        data = data[:, :, : max(lengths)]
+        lengths = frame_lengths * self.frame_shift  # Align to frame boundaries
+        data = data[:, :, : max(lengths)]  # Trim to longest actual sample
 
         # Encode with SSL and/or codec
         ssl_codes = self._ssl_encode_batch(data, lengths) if self.use_ssl else None
@@ -380,14 +377,27 @@ class DiscreteAudioIO(AbsIO):
             self._codec_encode_batch(data, lengths) if self.use_codec else None
         )
 
-        # Initialize codes tensor with padding
+        # Initialize codes tensor with padding tokens for each stream
         batch_size = data.size(0)
         max_frames = max(frame_lengths).item()
-        codes = [c[0] for c in self._stream_intervals]
+        codes = [
+            c[0] for c in self._stream_intervals
+        ]  # Get padding token for each stream
         codes = torch.Tensor(codes).to(dtype=torch.long, device=data.device)
-        codes = codes.tile(batch_size, max_frames, 1)
+        codes = codes.tile(
+            batch_size, max_frames, 1
+        )  # Broadcast to [batch, time, streams]
 
         def ensure_length(codes, length):
+            """Pad or truncate codes to match target length.
+
+            Args:
+                codes: Token tensor to adjust
+                length: Target sequence length
+
+            Returns:
+                Adjusted tensor with exact target length
+            """
             cur_length = codes.size(1)
             if cur_length > length:
                 codes = codes[:, :length]
@@ -417,7 +427,7 @@ class DiscreteAudioIO(AbsIO):
 
     def decode_batch(
         self, codes: torch.Tensor, lengths: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Decode a batch of encoded tokens back to audio.
 
         Note: Only codec tokens are used for audio reconstruction.
@@ -576,14 +586,30 @@ class DiscreteAudioIO(AbsIO):
 
         return int(frame_length)
 
-    def preprocess(self, data: Tuple[np.ndarray, int]):
+    def preprocess(
+        self, data: Tuple[np.ndarray, int]
+    ) -> Tuple[np.ndarray, Optional[Tuple[int, np.ndarray]], np.ndarray]:
+        """Preprocess audio for discrete tokenization.
 
+        Since tokenization happens on GPU, this returns placeholder sequences
+        and passes raw audio as continuous features for on-the-fly encoding.
+
+        Args:
+            data: Tuple of (audio_array, sample_rate) where audio_array
+                  has shape [num_channels, num_samples]
+
+        Returns:
+            Tuple of (seq, conti_feat, loss_mask):
+                - seq: Zero-filled placeholder array [length, num_stream]
+                - conti_feat: Tuple of (length, transposed_audio) for GPU encoding
+                - loss_mask: Stream weights broadcasted to [length, num_stream]
+        """
         wav, _ = data
         length = self.find_length(data)
 
         ones = np.ones((length, self.num_stream())).astype(np.int32)
-        paddings = ones * 0
-        conti_feat = (length, wav.T)
+        paddings = ones * 0  # Placeholder tokens, actual encoding on GPU
+        conti_feat = (length, wav.T)  # Store raw audio for later encoding
         loss_mask = ones * np.array(self.stream_weights).reshape(1, -1)
 
         return paddings, conti_feat, loss_mask
@@ -604,7 +630,7 @@ class DiscreteAudioIO(AbsIO):
         """
         return self.vocabulary
 
-    def get_stream_interval(self) -> Optional[List[tuple]]:
+    def get_stream_interval(self) -> Optional[List[Tuple[int, int]]]:
         """Get vocabulary index ranges for each stream.
 
         SSL streams come first, followed by codec streams.
@@ -640,11 +666,12 @@ class DiscreteAudioIO(AbsIO):
         """
         B, T, N = codes.size()
 
+        # Initialize output with padding tokens, extended length for delays
         new_codes = [c[0] for c in self._stream_intervals]
         new_codes = torch.Tensor(new_codes).to(dtype=torch.long, device=codes.device)
         new_codes = new_codes.tile(B, T + self.num_stream() - 1, 1)
 
-        # Apply delay to each stream
+        # Apply progressive delay to each stream (stream n delayed by n frames)
         for n in range(N):
             new_codes[:, n : n + T, n] = codes[:, :, n]
 
@@ -663,10 +690,10 @@ class DiscreteAudioIO(AbsIO):
         """
         _, T, N = codes.size()
 
-        # Calculate original time dimension
+        # Calculate original time dimension before delay was added
         T_original = T - self.num_stream() + 1
 
-        # Extract each stream with proper offset and stack
+        # Extract each stream, removing its delay offset
         new_codes = []
         for n in range(N):
             new_codes.append(codes[:, n : n + T_original, n])
@@ -753,16 +780,17 @@ class ContinuousAudioIO(AbsIO):
                     Qwen2_5OmniProcessor,
                 )
 
-                # Load only the audio tower from Qwen model
+                # Load full Qwen multimodal model
                 full_model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
                     self.encoder_hf_model_tag,
                     attn_implementation=self.attn_implementation,
                     torch_dtype=self.dtype,
                 )
 
-                del full_model.thinker.model
-                del full_model.thinker.visual
-                del full_model.thinker.lm_head
+                # Remove unnecessary components, keep only audio tower
+                del full_model.thinker.model  # Remove language model
+                del full_model.thinker.visual  # Remove vision components
+                del full_model.thinker.lm_head  # Remove output head
                 self.model = full_model.thinker.to(self.device)
 
                 # Load processor for audio preprocessing
@@ -785,7 +813,23 @@ class ContinuousAudioIO(AbsIO):
                 f"Encoder choice {self.encoder_choice} not implemented"
             )
 
-    def preprocess(self, data: np.ndarray) -> Dict[str, np.ndarray]:
+    def preprocess(
+        self, data: Tuple[np.ndarray, int]
+    ) -> Tuple[np.ndarray, Tuple[int, np.ndarray], np.ndarray]:
+        """Preprocess audio for continuous feature extraction.
+
+        Extracts spectrogram features and prepares them for batch encoding.
+
+        Args:
+            data: Tuple of (audio_array, sample_rate) where audio_array
+                  has shape [num_channels, num_samples]
+
+        Returns:
+            Tuple of (seq, conti_feat, loss_mask):
+                - seq: Zero array [after_length, 1] as placeholder
+                - conti_feat: Tuple of (after_length, mel_features)
+                - loss_mask: Zero array [after_length, 1] (no discrete tokens)
+        """
         wav, fs = data
         if fs != self.sample_rate:
             raise ValueError("Imcompatible sampling rate")
@@ -797,6 +841,7 @@ class ContinuousAudioIO(AbsIO):
         if wav.shape[0] > self.n_samples:
             raise ValueError("Input audio is too long to process")
 
+        # Extract mel-spectrogram features using processor
         output = self.processor(
             [wav],
             truncation=False,
@@ -807,28 +852,47 @@ class ContinuousAudioIO(AbsIO):
             sampling_rate=self.sample_rate,
         )
 
+        # Get valid features based on attention mask
         before_length = output["attention_mask"].sum()
         feat = output["input_features"][0, :, :before_length].T
 
-        after_length = (before_length - 1) // 2 + 1
-        after_length = (after_length - 2) // 2 + 1
+        # Calculate output length after model's two-layer downsampling
+        after_length = (before_length - 1) // 2 + 1  # First downsample
+        after_length = (after_length - 2) // 2 + 1  # Second downsample
 
         paddings = np.zeros((after_length, 1)).astype(np.int32)
 
         return paddings, (after_length, feat), paddings
 
-    def encode_batch(self, batch_data, length) -> Dict:
+    def encode_batch(
+        self, batch_data: torch.Tensor, length: torch.Tensor
+    ) -> List[torch.Tensor]:
+        """Encode batch of audio into continuous features.
 
-        batch_data = batch_data.transpose(1, 2)
+        Processes audio through the encoder model to extract dense features
+        with proper attention masking based on actual audio lengths.
+
+        Args:
+            batch_data: Audio tensor [batch, samples, channels]
+            length: Frame lengths for each sample [batch]
+
+        Returns:
+            List of audio feature tensors, one per sample in batch
+        """
+        batch_data = batch_data.transpose(1, 2)  # [batch, channels, samples]
+        # Create attention mask based on actual lengths
         axis = torch.arange(max(length), dtype=torch.long, device=batch_data.device)
         mask = (axis.unsqueeze(0) < length.unsqueeze(1)).int()
 
+        # Extract audio features using the encoder
         audio_features = self.model.get_audio_features(
             batch_data,
             feature_attention_mask=mask,
         )
+        # Calculate output lengths after model's downsampling
         output_length = (length - 1) // 2 + 1
         output_length = (output_length - 2) // 2 + 1
+        # Split concatenated features back into individual samples
         audio_features = audio_features.split(output_length.tolist(), dim=0)
 
         return audio_features
@@ -846,9 +910,10 @@ class ContinuousAudioIO(AbsIO):
             Frame length after encoding (number of frames)
         """
         wav, _ = data
-        frame_length = wav.shape[-1] // self.hop_length
-        frame_length = (frame_length - 1) // 2 + 1
-        frame_length = (frame_length - 2) // 2 + 1
+        frame_length = wav.shape[-1] // self.hop_length  # Initial frames
+        # Apply same downsampling as the encoder model
+        frame_length = (frame_length - 1) // 2 + 1  # First layer downsampling
+        frame_length = (frame_length - 2) // 2 + 1  # Second layer downsampling
 
         return int(frame_length)
 

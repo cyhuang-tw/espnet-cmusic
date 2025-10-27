@@ -132,7 +132,9 @@ class DataIteratorFactory:
                 # Accumulate all examples as individual batches
                 self.batched_examples.extend([[example] for example in data_list])
 
-        elif loader_state is None or not loader_state.exists():
+        elif loader_state is None or (
+            loader_state is not None and not loader_state.exists()
+        ):
             # (3) build all (task, dataset, example_id) for indexing
             all_subsets = dataset.get_all_examples()
             all_examples = list()
@@ -169,8 +171,11 @@ class DataIteratorFactory:
             self.batched_examples = batched_examples
             logging.info(f"Overall number of batches: {len(batched_examples)}")
 
-            self.save_iterator_state(loader_state)
+            # Only save state if loader_state path was provided
+            if loader_state is not None:
+                self.save_iterator_state(loader_state)
         else:
+            # loader_state is not None and exists
             self.load_iterator_state(loader_state)
 
     def get_iterator(self, global_step: int = 0, length: int = None) -> DataLoader:

@@ -1,6 +1,6 @@
 """HuggingFace tokenizer-based text I/O implementation"""
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from transformers import AutoTokenizer, AutoConfig
@@ -29,14 +29,17 @@ class HuggingFaceTextIO(AbsIO):
         # Get the actual vocabulary size from model config
         self.vocab_size = AutoConfig.from_pretrained(tokenizer_name).vocab_size
 
-    def preprocess(self, data: str) -> Dict[str, np.ndarray]:
+    def preprocess(self, data: str) -> Tuple[np.ndarray, None, np.ndarray]:
         """Tokenize single text string for data loading.
 
         Args:
             data: Single text string
 
         Returns:
-            Dictionary with 'data' (token IDs) and 'length'
+            Tuple of (tokens, conti_feat, loss_mask):
+                - tokens: Token IDs as numpy array [seq_len, 1]
+                - conti_feat: None (text is discrete)
+                - loss_mask: Loss weights [seq_len, 1], all 1.0
         """
         # Use same tokenization as find_length for consistency
         token_ids = self.tokenizer.encode(
@@ -112,7 +115,7 @@ class HuggingFaceTextIO(AbsIO):
 
         return vocab_list
 
-    def get_stream_interval(self) -> List[tuple]:
+    def get_stream_interval(self) -> List[Tuple[int, int]]:
         """Get vocabulary range for single stream.
 
         Returns:

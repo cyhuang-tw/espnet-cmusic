@@ -6,7 +6,7 @@ continuous (feature-based) representations.
 """
 
 from abc import ABC
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from torch.nn import Module
 import numpy as np
 
@@ -52,7 +52,9 @@ class AbsIO(ABC, Module):
         self.modality = modality
         self.is_discrete = is_discrete
 
-    def preprocess(self, data: Any) -> Any:
+    def preprocess(
+        self, data: Any
+    ) -> Tuple[np.ndarray, Optional[Tuple[int, np.ndarray]], np.ndarray]:
         """Preprocess single data item on CPU for multiprocessing data loading.
 
         This method is called during data loading in multiprocessing workers
@@ -67,7 +69,13 @@ class AbsIO(ABC, Module):
             data: Single raw data item in original format
 
         Returns:
-            Preprocessed data item ready for batching
+            Tuple of (seq, conti_feat, loss_mask):
+                - seq: np.ndarray of shape [t_len, num_stream] to be placed in
+                  training sequence. For continuous features, fill with zeros.
+                - conti_feat: Optional tuple of (length, features) where features
+                  is the continuous data with time dimension first. None if discrete.
+                - loss_mask: Float np.ndarray specifying loss weight for each token
+                  in seq, same shape as seq.
         """
         raise NotImplementedError
 
@@ -174,7 +182,7 @@ class AbsIO(ABC, Module):
         """
         raise NotImplementedError
 
-    def get_stream_interval(self) -> Optional[List[tuple]]:
+    def get_stream_interval(self) -> Optional[List[Tuple[int, int]]]:
         """Get the vocabulary index ranges for all streams.
 
         In multi-stream tokenizers, each stream uses a specific range of

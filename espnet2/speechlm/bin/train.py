@@ -7,7 +7,6 @@ This script handles argument parsing and distributed training setup.
 import argparse
 import logging
 import sys
-import os
 from pathlib import Path
 import yaml
 
@@ -138,6 +137,8 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
 
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
     # (1) Setup distributed training first to get rank info
     torch.cuda.set_device(args.local_rank)
     deepspeed.init_distributed()
@@ -169,8 +170,6 @@ def main():
     logger.info(f"World size: {world_size}")
     logger.info(f"Output directory: {args.output_dir}")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
     # (3) Initialize job template
     with open(args.train_config, "r") as f:
         train_config = yaml.safe_load(f)
@@ -183,7 +182,6 @@ def main():
     loading_config = train_config["data_loading"]
     preprocessor = job_template.build_preprocessor()
 
-    # Ensure loader_state directory exists
     loader_state_dir = args.output_dir / "loader_state"
     loader_state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,7 +203,6 @@ def main():
     valid_iterator_factories = dict()
     valid_iterator_args = dict(
         stats_dir=args.stats_dir,
-        loader_state=loader_state_dir / "valid.json",
         collate_fn=preprocessor.collate_fn,
         batchfy_method=loading_config["batchfy_method"],
         batch_size=loading_config["batch_size"],
@@ -259,6 +256,7 @@ def main():
         trainer_args=train_config["trainer"],
     )
     trainer.run()
+    wandb.finish()
 
 
 if __name__ == "__main__":

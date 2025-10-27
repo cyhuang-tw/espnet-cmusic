@@ -92,7 +92,7 @@ class DeepSpeedTrainer:
         checkpoint_path = None
 
         # Step 1: Check resume_path
-        if resume_path and Path(resume_path).exists():
+        if resume_path and resume_path.exists():
             checkpoint_path = resume_path
 
         # Step 2: Check latest checkpoint in output_dir
@@ -134,9 +134,6 @@ class DeepSpeedTrainer:
                 self.output_dir / "checkpoints" / f"step_{self.global_step}",
                 client_state=client_state,
             )
-
-        # Finish wandb run when training is complete
-        wandb.finish()
 
     def train(self) -> None:
         """Execute one training epoch."""
@@ -189,11 +186,14 @@ class DeepSpeedTrainer:
             wandb.log(all_stats, step=self.global_step)
 
     def train_dtype(self, ds_config):
-        if "bf16" in ds_config:
+        # Check if bf16 is enabled
+        if ds_config.get("bf16", {}).get("enabled", False):
             dtype = torch.bfloat16
-        elif "fp16" in ds_config:
+        # Check if fp16 is enabled
+        elif ds_config.get("fp16", {}).get("enabled", False):
             dtype = torch.float16
-        elif "amp" in ds_config:
+        # Check if amp (automatic mixed precision) is enabled
+        elif ds_config.get("amp", {}).get("enabled", False):
             if torch.cuda.is_bf16_supported():
                 dtype = torch.bfloat16
             else:
