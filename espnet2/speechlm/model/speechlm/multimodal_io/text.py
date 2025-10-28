@@ -1,9 +1,12 @@
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
 """HuggingFace tokenizer-based text I/O implementation"""
 
 from typing import List, Tuple
 
 import numpy as np
-from transformers import AutoTokenizer, AutoConfig
+from transformers import AutoConfig, AutoTokenizer
 
 from .abs_io import AbsIO
 

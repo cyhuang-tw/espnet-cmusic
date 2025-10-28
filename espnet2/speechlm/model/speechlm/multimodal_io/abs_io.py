@@ -1,3 +1,6 @@
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
 """Abstract class for multimodal input/output handling in SpeechLM.
 
 This module defines the base interface for handling different modalities
@@ -7,8 +10,9 @@ continuous (feature-based) representations.
 
 from abc import ABC
 from typing import Any, Dict, List, Optional, Tuple
-from torch.nn import Module
+
 import numpy as np
+from torch.nn import Module
 
 
 class AbsIO(ABC, Module):

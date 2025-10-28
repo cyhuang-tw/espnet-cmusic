@@ -1,14 +1,20 @@
-"""Audio I/O implementation for discrete and continuous representations (v2)."""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
+"""Audio I/O implementation for discrete and continuous representations"""
+
+from pathlib import Path
 from typing import List, Optional, Tuple
+
+import joblib
 import numpy as np
 import torch
-import joblib
-from pathlib import Path
 
-from .abs_io import AbsIO
+from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
 
 
+# NOTE(Jinchuan): derived from egs2/TEMPLATE/asr1/pyscripts/feats/dump_km_label.py
+# and convert to a torch.nn.Module.
 class KmeansModel(torch.nn.Module):
     """Apply k-means clustering to quantize SSL features into discrete tokens.
 
