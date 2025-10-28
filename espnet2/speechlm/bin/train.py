@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""
-Initial training script for SpeechLM with distributed training support.
-This script handles argument parsing and distributed training setup.
-"""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Training script for SpeechLM with distributed training support."""
 
 import argparse
 import logging
 import sys
 from pathlib import Path
+
+import deepspeed
+import torch
+import wandb
 import yaml
 
-import torch
-import deepspeed
-import wandb
-
-from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
+from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.trainer.deepspeed_trainer import DeepSpeedTrainer
 from espnet2.speechlm.utils.model_summary import model_summary
 
