@@ -1,4 +1,7 @@
-"""Iterator utilities for SpeechLM data loading."""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Data iterator factory for creating batch iterators in SpeechLM training."""
 
 import json
 import logging
@@ -9,8 +12,8 @@ from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 from torch.utils.data import DataLoader
 
 from espnet2.speechlm.dataloader.batch import batchfy
-from espnet2.speechlm.dataloader.task_conf import TASK_CONFIGS
 from espnet2.speechlm.dataloader.dataset import CombinedDataset
+from espnet2.speechlm.dataloader.task_conf import TASK_CONFIGS
 
 T = TypeVar("T")
 
@@ -105,7 +108,11 @@ class DataIteratorFactory:
             f"registered={dataset_registered}"
         )
         dataset = CombinedDataset(
-            dataset_unregistered, dataset_registered, rank=rank, world_size=world_size
+            dataset_unregistered,
+            dataset_registered,
+            num_worker=num_workers,
+            rank=rank,
+            world_size=world_size,
         )
         logging.info("Dataset construction completed")
 
@@ -178,7 +185,7 @@ class DataIteratorFactory:
             # loader_state is not None and exists
             self.load_iterator_state(loader_state)
 
-    def get_iterator(self, global_step: int = 0, length: int = None) -> DataLoader:
+    def build_iter(self, global_step: int = 0, length: int = None) -> DataLoader:
         """Get a DataLoader for a specific range of batches.
 
         Supports endless epochs by wrapping around when batches are

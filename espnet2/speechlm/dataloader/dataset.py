@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Dataset implementation for multimodal data loading in SpeechLM training."""
+
 import json
 import logging
 import os
@@ -8,8 +13,8 @@ from typing import Any, Dict, List, Tuple
 import yaml
 from torch.utils.data import Dataset
 
-from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
 from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import LhotseAudioReader
+from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +171,7 @@ class CombinedDataset(Dataset):
 
         # Use ProcessPoolExecutor for parallel loading
         max_workers = min(num_worker, len(dataset_paths))
+        max_workers = max(1, max_workers)
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all loading tasks
             futures = [
