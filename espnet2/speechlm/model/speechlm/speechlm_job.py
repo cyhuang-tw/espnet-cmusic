@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
-"""SpeechLM job template for training configuration."""
+# Copyright 2025 Jinchuan Tian (Carnegie Mellon University)
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-from typing import Any, Callable, Dict
+"""SpeechLM job template implementation for multimodal language modeling."""
+
 import re
-import torch
+from typing import Any, Callable, Dict
+
 import numpy as np
+import torch
 
 from espnet2.speechlm.model.abs_job import AbsJobTemplate
-from espnet2.speechlm.model.speechlm.task_conf_speechlm import SPEECHLM_TASK_CONFIGS
-
-# Multimodal IOs
-from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
-from espnet2.speechlm.model.speechlm.multimodal_io.text import HuggingFaceTextIO
-from espnet2.speechlm.model.speechlm.multimodal_io.audio import (
-    DiscreteAudioIO,
-    ContinuousAudioIO,
-)
 
 # Main speechlm model
 from espnet2.speechlm.model.speechlm.lm.parallel import ParallelHFModel
 
+# Multimodal IOs
+from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
+from espnet2.speechlm.model.speechlm.multimodal_io.audio import (
+    ContinuousAudioIO,
+    DiscreteAudioIO,
+)
+from espnet2.speechlm.model.speechlm.multimodal_io.text import HuggingFaceTextIO
+from espnet2.speechlm.model.speechlm.task_conf_speechlm import SPEECHLM_TASK_CONFIGS
 from espnet2.speechlm.utils.data import pad_list
 
 _multimodal_ios = {
@@ -172,9 +175,13 @@ class SpeechLMPreprocessor:
         self.vocab = vocab
         self.vocab_intervals = vocab_intervals
         self.pad_id = self.vocab.index("<|pad|>")
-        self.num_stream = max(
-            [io.num_stream() for io in multimodal_io.values() if io.is_discrete]
-        )
+
+        possible_num_stream = [
+            io.num_stream() for io in multimodal_io.values() if io.is_discrete
+        ]
+        if len(possible_num_stream) == 0:
+            raise ValueError("You should have at least one discrete multimodal IO")
+        self.num_stream = max(possible_num_stream)
 
     def find_length(self, key, data_dict):
         """Quickly compute sequence length without full preprocessing.
@@ -255,7 +262,7 @@ class SpeechLMPreprocessor:
         # (3) loop on each message
         # Determine where to place EOT tokens (when consecutive msgs have same role)
         apply_eots = [
-            msg1[0] == msg2[0] for msg1, msg2 in zip(messages[:1], messages[1:])
+            msg1[0] == msg2[0] for msg1, msg2 in zip(messages[:-1], messages[1:])
         ] + [False]
         for apply_eot, (role, this_io, this_data) in zip(apply_eots, messages):
             apply_loss = float(role == "assistant" or self.loss_region == "all")
