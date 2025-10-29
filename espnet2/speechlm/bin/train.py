@@ -112,9 +112,22 @@ def get_parser() -> argparse.ArgumentParser:
         help="Logging level",
     )
 
-    # Wandb configuration (mandatory local/offline logging)
+    # Wandb configuration
     wandb_group = parser.add_argument_group(
-        "Weights & Biases (Mandatory Local Logging)"
+        "Weights & Biases Configuration"
+    )
+    wandb_group.add_argument(
+        "--wandb-mode",
+        type=str,
+        default="online",
+        choices=["online", "offline", "disabled"],
+        help="Wandb logging mode (online=sync to cloud, offline=local only)",
+    )
+    wandb_group.add_argument(
+        "--wandb-project",
+        type=str,
+        default="speechlm",
+        help="Project name for wandb",
     )
     wandb_group.add_argument(
         "--wandb-name",
@@ -226,7 +239,7 @@ def main():
     message = model_summary(model)
     logger.info(message)
 
-    # (6) Initialize wandb: on rank 0 GPU; offline mode.
+    # (6) Initialize wandb: on rank 0 GPU
     wandb_name = args.wandb_name or f"run_{args.output_dir.name}"
     if rank == 0:
         wandb_argument_record = {
@@ -234,8 +247,8 @@ def main():
             "train_config": train_config,
         }
         wandb.init(
-            mode="offline",
-            project="local",
+            mode=args.wandb_mode,
+            project=args.wandb_project,
             name=wandb_name,
             config=wandb_argument_record,
             tags=args.wandb_tags,
@@ -244,7 +257,8 @@ def main():
         )
     else:
         wandb.init(mode="disabled")
-    logger.info(f"wandb initialization: name={wandb_name}")
+    logger.info(f"wandb initialization: mode={args.wandb_mode}, "
+                f"project={args.wandb_project}, name={wandb_name}")
 
     # (7) Initialize DeepSpeed trainer and train
     trainer = DeepSpeedTrainer(

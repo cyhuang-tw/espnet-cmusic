@@ -98,7 +98,7 @@ def worker(
         sequential_load=True,
         num_workers=0,
         collate_fn=lambda x: x[0],
-    ).get_iterator()
+    ).build_iter()
 
     # Collect statistics for this shard
     stats = {}

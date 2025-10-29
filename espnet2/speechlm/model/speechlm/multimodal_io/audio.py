@@ -863,6 +863,7 @@ class ContinuousAudioIO(AbsIO):
             truncation=False,
             return_tensors="np",
             do_normalize=True,
+            max_length=wav.shape[0],
             return_token_stamps=True,
             return_attention_mask=True,
             sampling_rate=self.sample_rate,

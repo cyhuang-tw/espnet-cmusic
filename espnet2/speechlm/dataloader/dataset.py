@@ -172,16 +172,12 @@ class CombinedDataset(Dataset):
         # Use ProcessPoolExecutor for parallel loading
         max_workers = min(num_worker, len(dataset_paths))
         max_workers = max(1, max_workers)
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all loading tasks
-            futures = [
-                executor.submit(_load_dataset_worker, args) for args in worker_args
-            ]
 
-            # Collect results as they complete
-            for future in as_completed(futures):
+        if max_workers == 1:
+            # Load sequentially when max_workers is 1 to avoid process pool overhead
+            for args in worker_args:
                 try:
-                    dataset_name, dataset, dataset_len = future.result()
+                    dataset_name, dataset, dataset_len = _load_dataset_worker(args)
                     self.datasets[dataset_name] = dataset
                     logging.info(
                         f"Loaded dataset [{dataset_name}]. "
@@ -189,6 +185,25 @@ class CombinedDataset(Dataset):
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to load dataset: {e}") from e
+        else:
+            # Use ProcessPoolExecutor for parallel loading
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all loading tasks
+                futures = [
+                    executor.submit(_load_dataset_worker, args) for args in worker_args
+                ]
+
+                # Collect results as they complete
+                for future in as_completed(futures):
+                    try:
+                        dataset_name, dataset, dataset_len = future.result()
+                        self.datasets[dataset_name] = dataset
+                        logging.info(
+                            f"Loaded dataset [{dataset_name}]. "
+                            f"Local dataset size: [{dataset_len}]."
+                        )
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to load dataset: {e}") from e
 
     def _load_registry(self) -> Dict[str, str]:
         """Load and merge registry files from ESPNET_DATASET_REGISTRY env variable.

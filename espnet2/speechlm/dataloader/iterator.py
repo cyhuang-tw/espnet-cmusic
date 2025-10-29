@@ -66,8 +66,8 @@ class DataIteratorFactory:
 
     def __init__(
         self,
-        unregistered_specifier: str,
-        registered_specifier: str,
+        unregistered_specifier: str = "",
+        registered_specifier: str = "",
         stats_dir: Union[str, Path] = None,
         loader_state: Optional[Path] = None,
         collate_fn: Optional[Callable] = None,
@@ -78,6 +78,7 @@ class DataIteratorFactory:
         world_size: int = 1,
         shuffle: bool = False,
         sequential_load: bool = False,
+        save_loader_state: bool = False,
         seed: int = 42,
     ):
         self.collate_fn = collate_fn
@@ -176,14 +177,15 @@ class DataIteratorFactory:
                 all_examples, all_lengths, batch_size, batchfy_method
             )
             self.batched_examples = batched_examples
-            logging.info(f"Overall number of batches: {len(batched_examples)}")
 
             # Only save state if loader_state path was provided
-            if loader_state is not None:
+            if loader_state is not None and save_loader_state:
                 self.save_iterator_state(loader_state)
         else:
             # loader_state is not None and exists
-            self.load_iterator_state(loader_state)
+            self.batched_examples = self.load_iterator_state(loader_state)
+        
+        logging.info(f"Overall number of batches: {len(self.batched_examples)}")
 
     def build_iter(self, global_step: int = 0, length: int = None) -> DataLoader:
         """Get a DataLoader for a specific range of batches.
@@ -253,6 +255,9 @@ class DataIteratorFactory:
             batch_sampler=batch_subset,
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
+            prefetch_factor=10 if self.num_workers > 0 else None,
+            pin_memory=True,
+            persistent_workers=True if self.num_workers > 0 else False,
         )
 
         return dataloader
@@ -292,14 +297,16 @@ class DataIteratorFactory:
 
         # Convert nested lists back to proper structure:
         # Each batch is a list of tuples (converted from lists by JSON)
-        self.batched_examples = [
+        batched_examples = [
             [tuple(example) for example in batch] for batch in state["batched_examples"]
         ]
 
         logging.info(
             f"Loaded iterator state from {loader_state} "
-            f"with {len(self.batched_examples)} batches"
+            f"with {len(batched_examples)} batches"
         )
+
+        return batched_examples
 
 
 def _parse_data_specifier(
