@@ -333,7 +333,7 @@ def build_parallel_hf_class(model_hf_tag):
             # Apply loss masks and compute weighted average
             loss = loss * loss_mask
             count = (loss_mask != 0.0).float()
-            loss = loss.sum() / count.sum()
+            loss = loss.sum() / count[:, :, 0].sum()
             stats["loss"] = loss.clone().detach()
 
             # Compute accuracy statistics during evaluation
