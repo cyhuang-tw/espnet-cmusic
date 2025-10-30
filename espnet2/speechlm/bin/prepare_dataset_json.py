@@ -9,8 +9,9 @@ import json
 import logging
 from pathlib import Path
 
-from espnet2.speechlm.configuration.task_conf import SUPPORTED_ENTRIES
+from espnet2.speechlm.dataloader.task_conf import SUPPORTED_ENTRIES
 from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import LhotseAudioReader
+from espnet2.speechlm.dataloader.multimodal_loader.dialogue import DialogueReader
 from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
 
 
@@ -34,7 +35,7 @@ def validate_triplet(triplet: str):
 
     name, path, reader = parts
 
-    # Validate name (audio1, audio2, ... or text1, text2, ...)
+    # Validate name (audio1, audio2, ... or text1, text2, ... or dialogue)
     if name not in SUPPORTED_ENTRIES:
         raise ValueError(f"Invalid entry name {name}")
 
@@ -47,8 +48,10 @@ def validate_triplet(triplet: str):
     absolute_path = str(path_obj.resolve())
 
     # Validate reader
-    if reader not in ["lhotse_audio", "text"]:
-        raise ValueError(f"Invalid reader '{reader}': must be 'lhotse_audio' or 'text'")
+    if reader not in ["lhotse_audio", "text", "dialogue"]:
+        raise ValueError(
+            f"Invalid reader '{reader}': must be 'lhotse_audio', 'text', or 'dialogue'"
+        )
 
     return name, absolute_path, reader
 
@@ -85,8 +88,10 @@ def prepare_dataset_json(
         # Create appropriate reader
         if reader == "lhotse_audio":
             data_sources[name] = LhotseAudioReader(path)
-        else:  # text
+        elif reader == "text":
             data_sources[name] = TextReader(path)
+        elif reader == "dialogue":
+            data_sources[name] = DialogueReader(path)
 
     # Find valid samples (those that exist in ALL data sources)
     if not data_sources:
@@ -124,7 +129,9 @@ def get_parser():
         nargs="+",
         required=True,
         help="List of name,path,reader triplets "
-        "(e.g., audio1,/path/to/audio,lhotse_audio)",
+        "(e.g., audio1,/path/to/audio,lhotse_audio "
+        "or text1,/path/to/text,text "
+        "or dialogue1,/path/to/dialogue_folder,dialogue)",
     )
     parser.add_argument(
         "--output_json",
