@@ -184,7 +184,7 @@ class DataIteratorFactory:
         else:
             # loader_state is not None and exists
             self.batched_examples = self.load_iterator_state(loader_state)
-        
+
         logging.info(f"Overall number of batches: {len(self.batched_examples)}")
 
     def build_iter(self, global_step: int = 0, length: int = None) -> DataLoader:

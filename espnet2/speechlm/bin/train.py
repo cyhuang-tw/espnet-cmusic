@@ -113,9 +113,7 @@ def get_parser() -> argparse.ArgumentParser:
     )
 
     # Wandb configuration
-    wandb_group = parser.add_argument_group(
-        "Weights & Biases Configuration"
-    )
+    wandb_group = parser.add_argument_group("Weights & Biases Configuration")
     wandb_group.add_argument(
         "--wandb-mode",
         type=str,
@@ -257,8 +255,10 @@ def main():
         )
     else:
         wandb.init(mode="disabled")
-    logger.info(f"wandb initialization: mode={args.wandb_mode}, "
-                f"project={args.wandb_project}, name={wandb_name}")
+    logger.info(
+        f"wandb initialization: mode={args.wandb_mode}, "
+        f"project={args.wandb_project}, name={wandb_name}"
+    )
 
     # (7) Initialize DeepSpeed trainer and train
     trainer = DeepSpeedTrainer(

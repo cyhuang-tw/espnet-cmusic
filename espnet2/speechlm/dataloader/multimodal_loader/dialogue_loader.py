@@ -35,9 +35,7 @@ class DialogueReader:
     VALID_ROLES = {"user", "assistant", "system"}
     VALID_MODALITIES = {"text", "audio"}
 
-    def __init__(
-        self, dialogue_folder: str, valid_ids: Optional[List[str]] = None
-    ):
+    def __init__(self, dialogue_folder: str, valid_ids: Optional[List[str]] = None):
         self.dialogues = {}
         dialogue_path = Path(dialogue_folder)
 
@@ -55,9 +53,9 @@ class DialogueReader:
             with open(json_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            assert isinstance(data, dict), (
-                f"Invalid format in {json_file}: expected dict, got {type(data)}"
-            )
+            assert isinstance(
+                data, dict
+            ), f"Invalid format in {json_file}: expected dict, got {type(data)}"
 
             for example_id, messages in data.items():
                 # Skip if not in valid_ids
@@ -81,9 +79,7 @@ class DialogueReader:
         """
         messages = self.dialogues[key]
 
-        assert isinstance(messages, list), (
-            f"Invalid messages for {key}: expected list"
-        )
+        assert isinstance(messages, list), f"Invalid messages for {key}: expected list"
 
         validated = []
         for i, msg in enumerate(messages):
@@ -118,9 +114,9 @@ class DialogueReader:
             elif modality == "audio":
                 # Load audio file
                 audio_path = Path(content)
-                assert audio_path.exists(), (
-                    f"Audio file not found at index {i} for {key}: {content}"
-                )
+                assert (
+                    audio_path.exists()
+                ), f"Audio file not found at index {i} for {key}: {content}"
 
                 # Load audio using soundfile
                 audio_data, sample_rate = sf.read(audio_path, dtype="float32")

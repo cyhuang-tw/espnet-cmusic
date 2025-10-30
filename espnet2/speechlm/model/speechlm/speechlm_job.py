@@ -350,7 +350,7 @@ class SpeechLMPreprocessor:
                 f"Conti feats: modality={this_io}, conti_feat={conti_start}, "
                 f"length={length}, feat={feat.shape}"
             )
-        
+
         raise ValueError("End of diagnose")
 
     def special_mask(self, value):

@@ -5,6 +5,7 @@
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -175,6 +176,8 @@ class DeepSpeedTrainer:
             length=self.save_interval,
         )
         for batch in iterator:
+            iter_start = time.time()
+
             batch = to_device(batch, "cuda", dtype=self.dtype)
             out = self.model_engine(**batch)
 
@@ -187,6 +190,7 @@ class DeepSpeedTrainer:
             stats = {f"train/{k}": float(v.cpu()) for k, v in stats.items()}
             stats["train/lr"] = self.model_engine.get_lr()[0]
             stats["train/grad_norm"] = self.model_engine.get_global_grad_norm()
+            stats["time/iter"] = time.time() - iter_start
 
             wandb.log(stats, step=self.global_step)
 
