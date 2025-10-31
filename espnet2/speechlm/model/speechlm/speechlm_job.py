@@ -41,13 +41,13 @@ class SpeechLMJobTemplate(AbsJobTemplate):
     configurations for speech language modeling tasks.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], is_train: bool = False):
         """Initialize the SpeechLM job template.
 
         Args:
             config: Dictionary containing job configuration parameters.
         """
-        super().__init__(config)
+        super().__init__(config, is_train)
 
         # (1) keep other configs
         self.config = config
@@ -277,6 +277,9 @@ class SpeechLMPreprocessor:
             loss_masks.append(special_mask)
 
             accum_length += 2
+
+            if not self.is_train and role == "assistant":
+                break
 
             # (3.2) the exact data processing
             this_seq, conti_feat, loss_mask = self.multimodal_io[this_io].preprocess(
