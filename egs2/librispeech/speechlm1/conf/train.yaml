@@ -1,0 +1,44 @@
+job_type: speechlm
+
+multimodal_io:
+    text:
+        tokenizer_name: Qwen/Qwen2.5-1.5B
+    discrete_audio:
+        codec_choice: ESPnet
+        codec_hf_model_tag: ftshijt/espnet_codec_dac_large_v1.4_360epoch
+        ssl_choice: ESPnet
+        ssl_hf_model_tag: espnet/xeus
+        delay_interleave: true
+        stream_weights: [0.5, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    continuous_audio:
+        encoder_choice: huggingface
+        encoder_hf_model_tag: Qwen/Qwen2.5-Omni-7B
+        attn_implementation: flash_attention_2
+        dtype: bfloat16
+
+model:
+    model_choice: parallel
+    model_hf_tag: Qwen/Qwen2.5-1.5B
+    model_conf:
+        attn_implementation: flash_attention_2
+        dtype: bfloat16
+    activation_checkpointing: true
+
+preprocessor:
+    audio_input: continuous_audio
+    audio_output: discrete_audio
+    loss_region: all
+
+data_loading:
+    batchfy_method: bucket
+    batch_size: 40000
+    save_loader_state: false
+    seed: 42
+    num_workers: 6
+
+trainer:
+    deepspeed_config: conf/deepspeed.json
+    freeze_param: [multimodal_io_dict.discrete_audio, multimodal_io_dict.continuous_audio]
+    max_step: 100000
+    save_interval: 5000
+    log_interval: 10

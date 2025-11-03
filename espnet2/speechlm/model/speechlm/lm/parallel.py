@@ -183,12 +183,11 @@ def build_parallel_hf_class(model_hf_tag):
                     - logits (inference mode without loss_mask)
             """
             input_ids = kwargs["seqs"]
-            conti_feats = kwargs["conti_feats"]
             loss_mask = kwargs.get("loss_masks", None)
             position_ids = kwargs.get("position_ids", None)
             past_key_values = kwargs.get("past_key_values", None)
 
-            inputs_embeds = self._embed(input_ids, conti_feats)
+            inputs_embeds = self._embed(input_ids, kwargs)
 
             # Forward through base transformer model
             output = self.model.forward(
@@ -217,7 +216,7 @@ def build_parallel_hf_class(model_hf_tag):
                 logits = self.lm_head(hidden_states)
                 return {"logits": logits}
 
-        def _embed(self, input_ids, conti_feats):
+        def _embed(self, input_ids, kwargs):
             """Create embeddings from multimodal inputs.
 
             Handles both discrete tokens (encoded on-the-fly) and continuous
@@ -233,26 +232,45 @@ def build_parallel_hf_class(model_hf_tag):
             """
 
             # (1) Process discrete modalities: encode and place tokens
-            for io_name, (io_index, io_feats) in conti_feats.items():
+            for io_name in self.multimodal_io_dict:
                 if not self.multimodal_io_dict[io_name].is_discrete:
                     continue
+                for name in ["indices", "feats", "lengths"]:
+                    if f"{io_name}_{name}" not in kwargs:
+                        continue
+
                 # Encode features to discrete codes
-                codes = self.multimodal_io_dict[io_name].encode_batch(*io_feats)
+                io_indices = kwargs[f"{io_name}_indices"]
+                io_feats = kwargs[f"{io_name}_feats"]
+                io_lengths = kwargs[f"{io_name}_lengths"]
+                codes = self.multimodal_io_dict[io_name].encode_batch(
+                    io_feats, io_lengths
+                )
                 # Add vocabulary offset for this modality
                 codes = codes + self.vocab_intervals[io_name][0][0]
                 # Place codes in correct positions
-                for code, (bidx, start, length) in zip(codes, io_index):
+                for code, (bidx, start, length) in zip(codes, io_indices):
                     input_ids[bidx, start : start + length] = code[:length]
 
             # (2) Convert tokens to embeddings and sum across streams
             input_embeds = self.model.embed_tokens(input_ids).sum(dim=2)
 
             # (3) Process continuous modalities: encode and project features
-            for io_name, (io_index, io_feats) in conti_feats.items():
+            for io_name in self.multimodal_io_dict:
                 if self.multimodal_io_dict[io_name].is_discrete:
                     continue
-                io_feats = self.multimodal_io_dict[io_name].encode_batch(*io_feats)
-                for feat, (bidx, start, length) in zip(io_feats, io_index):
+                for name in ["indices", "feats", "lengths"]:
+                    if f"{io_name}_{name}" not in kwargs:
+                        continue
+
+                # Encode features to discrete codes
+                io_indices = kwargs[f"{io_name}_indices"]
+                io_feats = kwargs[f"{io_name}_feats"]
+                io_lengths = kwargs[f"{io_name}_lengths"]
+                io_feats = self.multimodal_io_dict[io_name].encode_batch(
+                    io_feats, io_lengths
+                )
+                for feat, (bidx, start, length) in zip(io_feats, io_indices):
                     feat = self.adaptor[io_name](feat)
                     input_embeds[bidx, start : start + length] = feat[:length]
 

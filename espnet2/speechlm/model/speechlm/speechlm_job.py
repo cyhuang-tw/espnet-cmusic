@@ -114,6 +114,7 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             io_name: io.copy_for_worker() for io_name, io in self.multimodal_io.items()
         }
         return SpeechLMPreprocessor(
+            is_train=self.is_train,
             multimodal_io=multimodal_io,
             vocab=self.vocab,
             vocab_intervals=self.vocab_intervals,
@@ -155,6 +156,7 @@ class SpeechLMPreprocessor:
 
     def __init__(
         self,
+        is_train,
         multimodal_io,
         vocab,
         vocab_intervals,
@@ -163,6 +165,7 @@ class SpeechLMPreprocessor:
         loss_region: str = "assistant",
         batchfy_method: str = "bucket",
     ):
+        self.is_train = is_train
 
         # (1) keep all multimodal_io
         self.multimodal_io = multimodal_io
@@ -207,12 +210,20 @@ class SpeechLMPreprocessor:
 
         Processes each sample, pads sequences to same length, and organizes
         continuous features by modality. Returns dict ready for model forward.
+
+        The return dict value should always in the format of either tensor or
+        list of strings. No nested format is allowed.
         """
         if self.batchfy_method != "bucket":
             raise NotImplementedError("Only bucket collate function is implemented")
 
-        data_dicts = [self.preprocessing(key, data_dict) for key, data_dict in data_lst]
+        return_dict = dict()
 
+        # (1) single-example preprocessing
+        data_dicts = [self.preprocessing(key, data_dict) for key, data_dict in data_lst]
+        return_dict["keys"] = [key for key, _ in data_lst]
+
+        # (2) discrete token sequences
         seqs, conti_feats, loss_masks = [], [], []
         for bidx, data_dict in enumerate(data_dicts):
             seqs.append(data_dict["sequence"])
@@ -221,9 +232,10 @@ class SpeechLMPreprocessor:
             for conti_feat in data_dict["conti_feats"]:
                 conti_feats.append((bidx,) + conti_feat)
 
-        seqs, _ = pad_list(seqs)
-        loss_masks, _ = pad_list(loss_masks)
+        return_dict["seqs"], _ = pad_list(seqs)
+        return_dict["loss_masks"], _ = pad_list(loss_masks)
 
+        # (3) continuous features
         conti_feats_dict = dict()
         for bidx, this_io, start, length, feat in conti_feats:
             if this_io not in conti_feats_dict:
@@ -231,17 +243,13 @@ class SpeechLMPreprocessor:
             conti_feats_dict[this_io][0].append((bidx, start, length))
             conti_feats_dict[this_io][1].append(feat)
 
-        for io_dict in conti_feats_dict.values():
-            io_dict[1] = pad_list(io_dict[1])
+        for this_io, (indices, feats) in conti_feats_dict.items():
+            return_dict[f"{this_io}_indices"] = torch.Tensor(indices).long()
+            return_dict[f"{this_io}_feats"], return_dict[f"{this_io}_lengths"] = (
+                pad_list(feats)
+            )
 
-        keys = [key for key, _ in data_lst]
-
-        return {
-            "key": keys,
-            "seqs": seqs,
-            "conti_feats": conti_feats_dict,
-            "loss_masks": loss_masks,
-        }
+        return return_dict
 
     def preprocessing(self, key, data_dict):
         """Convert single raw data dict into training-ready format.

@@ -187,7 +187,7 @@ def main():
     logger.info(f"Loaded training config from: {args.train_config}")
 
     job_template_class = _all_job_types[train_config["job_type"]]
-    job_template = job_template_class(train_config)
+    job_template = job_template_class(train_config, is_train=True)
 
     # (4) build data iterator factory
     loading_config = train_config["data_loading"]
