@@ -17,8 +17,6 @@ import yaml
 from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
 from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.trainer.deepspeed_trainer import DeepSpeedTrainer
-from espnet2.speechlm.utils.model_summary import model_summary
-
 
 def get_parser() -> argparse.ArgumentParser:
     """Build argument parser for training script."""
@@ -234,8 +232,6 @@ def main():
 
     # (5) build model
     model = job_template.build_model()
-    message = model_summary(model)
-    logger.info(message)
 
     # (6) Initialize wandb: on rank 0 GPU
     wandb_name = args.wandb_name or f"run_{args.output_dir.name}"

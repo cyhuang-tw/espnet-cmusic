@@ -137,6 +137,7 @@ class SpeechLMJobTemplate(AbsJobTemplate):
         model = model_class(
             model_hf_tag=model_config["model_hf_tag"],
             multimodal_io=self.multimodal_io,
+            vocab=self.vocab,
             vocab_intervals=self.vocab_intervals,
             **model_config["model_conf"],
         )
@@ -233,7 +234,8 @@ class SpeechLMPreprocessor:
                 conti_feats.append((bidx,) + conti_feat)
 
         return_dict["seqs"], _ = pad_list(seqs)
-        return_dict["loss_masks"], _ = pad_list(loss_masks)
+        if self.is_train:
+            return_dict["loss_masks"], _ = pad_list(loss_masks)
 
         # (3) continuous features
         conti_feats_dict = dict()
@@ -286,9 +288,6 @@ class SpeechLMPreprocessor:
 
             accum_length += 2
 
-            if not self.is_train and role == "assistant":
-                break
-
             # (3.2) the exact data processing
             this_seq, conti_feat, loss_mask = self.multimodal_io[this_io].preprocess(
                 this_data
@@ -328,18 +327,19 @@ class SpeechLMPreprocessor:
                 seq.append(self.special_token("<|eos|>"))
             loss_masks.append(special_mask)
             accum_length += 1
+        
+        # TODO(speechlm): Add CFG here
 
         # (4) concat
         seq = np.concatenate(seq, axis=0)
         loss_mask = np.concatenate(loss_masks, axis=0)
 
-        # TODO(speechlm): Add CFG here
         data = {
             "sequence": seq,
             "conti_feats": conti_feats,
-            "loss_mask": loss_mask,
+            'loss_mask': loss_mask,
         }
-
+        
         return data
 
     def diagnose(self, data):
@@ -396,11 +396,17 @@ class SpeechLMPreprocessor:
                 raise ValueError(
                     "If dialogue exist, there should be no more other entries"
                 )
+            if not self.is_train:
+                assert all([msg[0] != 'assistant' for msg in data_dict['dialogue']]), "during inference, input dialogue should not contain model output (assistant message)"
             return data_dict["dialogue"]
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()
             for role, entry in task_config:
+                # When inference, only process the input information (user and system)
+                if role == "assistant" and not self.is_train:
+                    break
+
                 # Select IO type based on entry name and role
                 if bool(re.match(r"^audio", entry)):
                     # User/system use input audio IO, assistant uses output audio IO
@@ -417,3 +423,4 @@ class SpeechLMPreprocessor:
                 message = (role, this_io, this_data)
                 messages.append(message)
             return messages
+        
