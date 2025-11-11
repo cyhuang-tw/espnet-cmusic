@@ -129,9 +129,7 @@ def inference_worker(
     """Worker process for inference with data sharding."""
     # Set up logger for this worker
     logger = setup_worker_logger(rank, output_dir)
-    logger.info(
-        f"Starting inference worker (rank {rank}/{world_size})"
-    )
+    logger.info(f"Starting inference worker (rank {rank}/{world_size})")
 
     # Load configs in worker
     with open(train_config_path, "r") as f:
@@ -149,7 +147,7 @@ def inference_worker(
     model.prepare_inference()
     dtype = inference_config.get("dtype", "bfloat16")
     dtype = getattr(torch, dtype)
-    model =  model.to(device='cuda', dtype=dtype).eval()
+    model = model.to(device="cuda", dtype=dtype).eval()
 
     preprocessor = job_template.build_preprocessor()
 
@@ -169,12 +167,10 @@ def inference_worker(
     logger.info("Starting inference on data shard")
 
     for idx, sample in enumerate(test_iterator):
-        sample = to_device(sample, 'cuda', dtype=dtype)
-        task, data_name, example_id = sample.pop('keys')[0]
+        sample = to_device(sample, "cuda", dtype=dtype)
+        task, data_name, example_id = sample.pop("keys")[0]
 
-        logger.info(
-            f"Processing sample {idx}: {task}/{data_name}/{example_id}"
-        )
+        logger.info(f"Processing sample {idx}: {task}/{data_name}/{example_id}")
         messages = model.inference(inference_config, **sample)
         assert 1 == 2
 

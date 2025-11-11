@@ -18,6 +18,7 @@ from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
 from espnet2.speechlm.model import _all_job_types
 from espnet2.speechlm.trainer.deepspeed_trainer import DeepSpeedTrainer
 
+
 def get_parser() -> argparse.ArgumentParser:
     """Build argument parser for training script."""
     parser = argparse.ArgumentParser(

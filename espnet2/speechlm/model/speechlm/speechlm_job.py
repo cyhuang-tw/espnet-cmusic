@@ -327,7 +327,7 @@ class SpeechLMPreprocessor:
                 seq.append(self.special_token("<|eos|>"))
             loss_masks.append(special_mask)
             accum_length += 1
-        
+
         # TODO(speechlm): Add CFG here
 
         # (4) concat
@@ -337,9 +337,9 @@ class SpeechLMPreprocessor:
         data = {
             "sequence": seq,
             "conti_feats": conti_feats,
-            'loss_mask': loss_mask,
+            "loss_mask": loss_mask,
         }
-        
+
         return data
 
     def diagnose(self, data):
@@ -397,7 +397,9 @@ class SpeechLMPreprocessor:
                     "If dialogue exist, there should be no more other entries"
                 )
             if not self.is_train:
-                assert all([msg[0] != 'assistant' for msg in data_dict['dialogue']]), "during inference, input dialogue should not contain model output (assistant message)"
+                assert all(
+                    [msg[0] != "assistant" for msg in data_dict["dialogue"]]
+                ), "during inference, input dialogue should not contain model output (assistant message)"
             return data_dict["dialogue"]
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
@@ -423,4 +425,3 @@ class SpeechLMPreprocessor:
                 message = (role, this_io, this_data)
                 messages.append(message)
             return messages
-        
