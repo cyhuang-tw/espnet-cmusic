@@ -31,7 +31,7 @@ preprocessor:
 
 data_loading:
     batchfy_method: bucket
-    batch_size: 40000
+    batch_size: 5000
     save_loader_state: false
     seed: 42
     num_workers: 6

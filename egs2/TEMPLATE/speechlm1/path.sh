@@ -22,6 +22,9 @@ export NCCL_SOCKET_IFNAME="^lo,docker,virbr,vmnet,vboxnet"
 # NOTE(kamo): Source at the last to overwrite the setting
 . local/path.sh
 
+# NOTE(Jinchuan): avoid pytorch memory segmentation
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 ESPNET_DATASET_REGISTRY=
 # NOTE(Jinchuan): selectively enable this for wavlab internal usage.
 if [[ "$(hostname)" == dt* ]] || [[ "$(hostname)" == gh* ]] || [[ "$(hostname)" == gpu* ]] ; then # For Delta/DeltaAI
