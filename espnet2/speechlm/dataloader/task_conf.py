@@ -7,7 +7,7 @@
 SUPPORTED_ENTRIES = (
     [f"audio{i}" for i in range(1, 11)]  # audio1 to audio10
     + [f"text{i}" for i in range(1, 11)]  # text1 to text10
-    + ["dialogue"]
+    + ["dialogue", "speaker"]
 )
 
 

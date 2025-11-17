@@ -15,14 +15,14 @@ master_addr=localhost
 master_port=12346
 
 # ASR
-train_registered_specifier="audio_to_text:librispeech_train_960"
-valid_registered_specifier="audio_to_text:librispeech_dev_clean"
-test_registered_specifier="audio_to_text:librispeech_test_clean"
+train_unregistered_specifier="audio_to_text:librispeech_train_960:manifest/train_960/dataset.json"
+valid_unregistered_specifier="audio_to_text:librispeech_dev:manifest/dev/dataset.json"
+test_unregistered_specifier="audio_to_text:librispeech_test_clean:manifest/test_clean/dataset.json"
 
 # TTS
-train_registered_specifier="text_to_audio:librispeech_train_960"
-valid_registered_specifier="text_to_audio:librispeech_dev_clean"
-test_registered_specifier="text_to_audio:librispeech_test_clean"
+# train_unregistered_specifier="text_to_audio:librispeech_train_960:manifest/train_960/dataset.json"
+# valid_unregistered_specifier="text_to_audio:librispeech_dev:manifest/dev/dataset.json"
+# test_unregistered_specifier="text_to_audio:librispeech_test_clean:manifest/test_clean/dataset.json"
 
 train_config=conf/train.yaml
 inference_config=conf/inference.yaml
@@ -32,13 +32,13 @@ exp_dir=exp/librispeech_asr
 . utils/parse_options.sh
 
 . ./db.sh
-# source ./path.sh
+. ./path.sh
 . ./cmd.sh
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
   python ../../../espnet2/speechlm/bin/prepare_length_stats.py \
-    --train-registered-specifier "${train_registered_specifier}" \
-    --valid-registered-specifier "${valid_registered_specifier}" \
+    --train-unregistered-specifier "${train_unregistered_specifier}" \
+    --valid-unregistered-specifier "${valid_unregistered_specifier}" \
     --train-config ${train_config} \
     --output-dir ${stats_dir} \
     --num-workers 128
@@ -52,8 +52,8 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     --master_addr ${master_addr} \
     --master_port ${master_port} \
       ../../../espnet2/speechlm/bin/train.py \
-      --train-registered-specifier "${train_registered_specifier}" \
-      --valid-registered-specifier "${valid_registered_specifier}" \
+      --train-unregistered-specifier "${train_unregistered_specifier}" \
+      --valid-unregistered-specifier "${valid_unregistered_specifier}" \
       --train-config ${train_config} \
       --stats-dir ${stats_dir} \
       --output-dir ${exp_dir} 

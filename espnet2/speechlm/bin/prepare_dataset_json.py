@@ -11,7 +11,7 @@ from pathlib import Path
 
 from espnet2.speechlm.dataloader.task_conf import SUPPORTED_ENTRIES
 from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import LhotseAudioReader
-from espnet2.speechlm.dataloader.multimodal_loader.dialogue import DialogueReader
+from espnet2.speechlm.dataloader.multimodal_loader.dialogue_loader import DialogueReader
 from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
 
 

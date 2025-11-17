@@ -1,0 +1,10 @@
+psutil
+deepspeed
+transformers
+huggingface-hub
+lhotse
+pyyaml
+joblib
+typeguard
+humanfriendly
+librosa

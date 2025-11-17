@@ -103,6 +103,7 @@ def worker(
     # Collect statistics for this shard
     stats = {}
     for key, data_dict in iterator:
+        key = tuple(key)
         stats[key] = preprocessor.find_length(key, data_dict)
 
     return stats
