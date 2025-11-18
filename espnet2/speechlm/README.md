@@ -2,7 +2,7 @@
 The latest codebase is always under this Github branch. ```https://github.com/jctian98/espnet/tree/speechlm_main```  
 Codebase: ```<espnet_root>/espnet2/speechlm```   
 Recipe: ```<espnet_root>/egs2/librispeech/speechlm```   
-Please Note: The whole ESPnet project is very large, but the codebase for Nemotron-Audio is totally self-consistent: it contains zero dependency to any other folders. The codebase folder itself is small and clean.
+Please Note: The whole ESPnet project is very large, but the codebase itself is totally self-consistent: it contains zero dependency to any other folders. The codebase folder itself is small and clean.
 
 ### Installation
 (1) Ensure you have a valid Python environment. Here is an example of using Conda, but feel free to switch to other methods (e.g., docker with system Python).
@@ -40,7 +40,7 @@ python setup.py install
 (6) Install the whole ESPnet. This is only to use the Codec and SSL model from ESPnet. We can avoid this step later by using X-Codec
 ```bash
 cd <espnet_root>
-pip install -e "[train, recipe]"
+pip install -e ".[train, recipe]"
 ```
 
 ### Launch the training
