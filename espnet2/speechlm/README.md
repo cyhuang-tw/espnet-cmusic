@@ -8,7 +8,7 @@ Please Note: The whole ESPnet project is very large, but the codebase itself is 
 (1) Ensure you have a valid Python environment. Here is an example of using Conda, but feel free to switch to other methods (e.g., docker with system Python).
 ```bash
 cd <espnet_root>/tools
-bash setup_anaconda.sh miniconda3 nemotron_audio 3.11
+bash setup_anaconda.sh miniconda3 dev 3.11
 source activate_python.sh
 ```
 
