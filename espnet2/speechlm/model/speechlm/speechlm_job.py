@@ -340,6 +340,7 @@ class SpeechLMPreprocessor:
             "loss_mask": loss_mask,
         }
 
+        # self.diagnose(data) # comment this for debug
         return data
 
     def diagnose(self, data):
@@ -399,7 +400,10 @@ class SpeechLMPreprocessor:
             if not self.is_train:
                 assert all(
                     [msg[0] != "assistant" for msg in data_dict["dialogue"]]
-                ), "during inference, input dialogue should not contain model output (assistant message)"
+                ), (
+                    "during inference, input dialogue should not contain "
+                    "model output (assistant message)"
+                )
             return data_dict["dialogue"]
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]

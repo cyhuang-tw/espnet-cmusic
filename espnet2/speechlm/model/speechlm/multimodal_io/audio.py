@@ -488,7 +488,7 @@ class DiscreteAudioIO(AbsIO):
         # Decode codec tokens to audio
         audio, audio_lengths = self._codec_decode_batch(codec_codes, lengths)
 
-        return audio, audio_lengths
+        return audio, audio_lengths, self.sample_rate
 
     def _codec_decode_batch(
         self, codes: torch.Tensor, lengths: torch.Tensor
@@ -543,7 +543,7 @@ class DiscreteAudioIO(AbsIO):
                 raise ValueError(
                     "ESPnet-Hubert SSL model doesn't support multi-channel audio"
                 )
-            feats = self.ssl_model.encode(data.squeeze(1), length)["encoder_output"][-1]
+            feats = self.ssl_model.inference_encode(data.squeeze(1), length)[0]
             ssl_codes = self.km_model(feats)
         else:
             raise NotImplementedError(f"SSL choice '{self.ssl_choice}' not implemented")

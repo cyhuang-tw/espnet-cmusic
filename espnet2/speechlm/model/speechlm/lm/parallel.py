@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import transformers
 from transformers import AutoConfig
+from transformers.cache_utils import DynamicCache
 
 
 def ParallelHFModel(model_hf_tag, **kwargs):
@@ -231,7 +232,6 @@ def build_parallel_hf_class(model_hf_tag):
                 if not self.multimodal_io_dict[io_name].is_discrete:
                     continue
 
-                # if any([f"{io_name}_{name}" not in kwargs for name in ["indices", "feats", "lengths"]]):
                 if (
                     f"{io_name}_indices" not in kwargs
                     or f"{io_name}_feats" not in kwargs
@@ -379,113 +379,140 @@ def build_parallel_hf_class(model_hf_tag):
 
             return loss, stats
 
-        ### Below are all inference logics ###
+        # Below are all inference logics
         @torch.no_grad()
-        def inference(self, inference_config, **kwargs):
-            num_hypotheses = inference_config.get("num_hypotheses", 1)
+        def inference(self, inference_config: dict, cache: list = None, **kwargs):
 
             messages = []
             while True:
-                if len(messages) > 1 and num_hypotheses > 1:
-                    raise ValueError(
-                        f"For multi-turn inference, only one hypothesis can be generated"
-                    )
-
-                batch_message = self.inference_segment(
+                # (1) predict token sequence
+                decoded_sequences, cache = self.inference_segment(
                     inference_config,
-                    num_hypotheses=num_hypotheses,
+                    cache=cache,
                     enforce_modality=None,
                     **kwargs,
                 )
 
-                # TODO: post-processing.
+                # (2) detokenization
+                for seq, modality in decoded_sequences:
 
-                end_token = batch_message[0][-1][
-                    0, -1, 0
-                ]  # If eos detected, steop generation.
-                if end_token == self.eos_token_id:
-                    break
+                    if (
+                        seq[-1, 0] == self.eos_token_id
+                        or seq[-1, 0] == self.eot_token_id
+                    ):
+                        seq = seq[:-1]  # remove <|eos|> or <|eou|>
+
+                    io_name = "discrete_audio" if modality == "audio" else modality
+                    seq = seq.unsqueeze(0) - self.vocab_intervals[io_name][0][0]
+
+                    io = self.multimodal_io_dict[io_name]
+                    lengths = torch.Tensor([seq.size(1)]).long().to(seq.device)
+                    content = io.decode_batch(seq, lengths)
+
+                    msg = ["assistant", modality, content]
+                    messages.append(msg)
+
+                # (3) Terminate when applicable
+                if len(decoded_sequences) > 1:
+                    break  # multi-segment decoding only supports batch size of 1
+
+                elif decoded_sequences[0][0][-1, 0] != self.eot_token_id:
+                    break  # decode next segment only when ending with <|eot|>
+
+            return messages, cache
 
         def inference_segment(
             self,
-            inference_config: dict = {},
-            num_hypotheses: int = 1,
+            config: dict,
+            cache: list = None,
             enforce_modality: str = None,
             **kwargs,
         ):
 
-            # (1) kv_cache preprocessing
-            input_ids = kwargs.get("seqs", None)
-            cache = kwargs.get("past_key_values", None)
-            if num_hypotheses > 1:
-                if input_ids is not None:
-                    input_ids = input_ids.expand(num_hypotheses, 1, 1)
-                if cache is not None:
-                    cache = self._select_cache(
-                        cache, [0 for _ in range(num_hypotheses)]
-                    )
+            # (1) Prefill, with assistant role token
+            input_ids = kwargs.get("seqs")
+            input_ids = torch.cat([input_ids, self.assistant_token], dim=1)
+            device = input_ids.device
 
-            # (2) prefill, if any
-            if input_ids is not None:
-                input_embeds = self._embed(input_ids, kwargs)
-                output = self.model(
-                    inputs_embeds=input_embeds, past_key_values=cache, use_cache=True
-                )
-                cache = output.past_key_values
+            input_embeds = self._embed(input_ids, kwargs)
+            logits, cache = self._step(
+                input_embeds=input_embeds,
+                past_key_values=cache,
+                mask=self.modality_mask,
+            )
+            logits = logits[:, -1:, :]
 
-            # (3) role (assistant) token and modality token
-            token = self.assistant_token
-            logits, cache = self._step(token, cache, mask=self.modality_mask)
-
+            # (2) determine modality token and the corresponding mask
             if enforce_modality is not None:
-                modality = kwargs["enforce_modality"]
-                token = getattr(self, f"{modality}_token")
-                logits_mask = getattr(self, f"{modality}_mask")
+                modality_token = getattr(self, f"{enforce_modality}_token")
             else:
-                token = logits[:, :, :1].argmax(-1)
-                modality_id = int(token[0, 0, 0])
-                modality = self.vocab[modality_id]
-                modality = modality.lstrip("<|").rstrip(">|")
-                logits_mask = getattr(self, f"{modality}_mask")
+                modality_token = logits.argmax(3)
 
-            config = inference_config[modality]
+            modality = modality_token.flatten()[0].item()
+            modality = self.vocab[modality].replace("<|", "").replace("|>", "")
+            modality_mask = getattr(self, f"{modality}_mask")
+            if modality not in config:
+                raise ValueError(
+                    f"Try to predict {modality} modality "
+                    "But the corresponding inference config is missing."
+                )
+            this_config = config[modality]
 
-            # (4) inference loop
-            step = 1
+            # (3) preprocess for multi-hypothesis inference and CFG
+            if config["num_hypo"] > 1:
+                indices = torch.zeros(config["num_hypo"]).long().to(device)
+                cache = self._select_cache(cache, indices)
+                modality_token = modality_token.tile(config["num_hypo"], 1, 1)
+
+            if this_config.get("cfg", 1) > 1:
+                raise NotImplementedError("CFG is not implemented yet")
+
+            # (4) Inference loop
             hypos = list()
-            hypo_lens = torch.ones(num_hypotheses).long() * -1
-            while step <= config["max_steps"]:
-                logits, cache = self._step(token, cache, mask=logits_mask)
-                token = self._logits_to_token(
-                    logits, config["temperature"], config["top_k"]
+            finish_idx = torch.ones(config["num_hypo"]).long().to(device) * -1
+            prev_token = modality_token
+            for step in range(this_config["max_step"]):
+                # (4.1) Model inference
+                logits, cache = self._step(
+                    input_ids=prev_token, past_key_values=cache, mask=modality_mask
                 )
 
-                is_finish = torch.logical_or(
-                    token[:, 0, 0] == self.eot_token_id,
-                    token[:, 0, 0] == self.eos_token_id,
+                # (4.2) token prediction based on logits
+                prev_token = self._logits_to_token(
+                    logits,
+                    temperature=this_config["temperature"],
+                    topk=this_config["topk"],
                 )
-                is_finish = torch.logical_and(is_finish, hypo_lens == -1)
-                hypo_lens = torch.where(is_finish, step, hypo_lens)
+                hypos.append(prev_token)
 
-                if step == ["max_steps"]:
-                    token = torch.where(hypo_lens == -1, self.eos_token, token)
-                    hypo_lens = torch.where(hypo_lens == -1, step, hypo_lens)
+                # (4.3) Break when proper
+                finish_here = torch.logical_and(
+                    torch.logical_or(
+                        prev_token[:, 0, 0] == self.eot_token_id,
+                        prev_token[:, 0, 0] == self.eos_token_id,
+                    ),
+                    finish_idx == -1,
+                )
+                finish_idx = torch.where(finish_here, step, finish_idx)
 
-                hypos.append(token)
-
-                if torch.all(hypo_lens > 0):
+                if torch.all(finish_idx >= 0):
                     break
 
-            # (5) finalize
-            _, cache = self._step(token, cache, mask=logits_mask)
+            # (5) Finalize
+            finish_idx = torch.where(finish_idx == -1, step, finish_idx)
             hypos = torch.cat(hypos, dim=1)
 
-            ret_val = list()
-            for hypo, hlen in zip(hypos, hypo_lens):
-                hypo = hypo[:hlen]
-                ret_val.append("assistant", modality, hypo)
+            # NOTE(Jinchuan): Prefill the last token. This is effective only for
+            # multi-segment inference with batch size of 1
+            prev_token[..., 1:] = 0
+            _, cache = self._step(input_ids=prev_token, past_key_values=cache)
 
-            return ret_val
+            hypo_lst = list()
+            for idx, hypo in zip(finish_idx, hypos):
+                hypo = hypo[: idx + 1]
+                hypo_lst.append((hypo, modality))
+
+            return hypo_lst, cache
 
         def prepare_inference(self):
             # (1) the special tokens for prefill
@@ -498,17 +525,17 @@ def build_parallel_hf_class(model_hf_tag):
 
             # (2) modality mask for modality prediction
             tokens = ["audio", "text", "image", "video", "toolcall"]
-            mask = torch.ones(self.num_stream, len(self.vocab))
+            mask = torch.ones(self.num_stream, len(self.vocab)).bool()
             for token in tokens:
                 token_id = self.vocab.index(f"<|{token}|>")
                 mask[0, token_id] = False
-            mask[1:0] = False
+            mask[1:, 0] = False
             mask = mask[None, None, :, :]
             self.register_buffer("modality_mask", mask)
 
             # (3) mask for restricted decoding for each modality
-            self.eot_token_id = self.vocab.index(f"<|eot|>")
-            self.eos_token_id = self.vocab.index(f"<|eos|>")
+            self.eot_token_id = self.vocab.index("<|eot|>")
+            self.eos_token_id = self.vocab.index("<|eos|>")
             for io_name, intervals in self.vocab_intervals.items():
                 mask = torch.ones(self.num_stream, len(self.vocab)).bool()
                 for idx, (start, end) in enumerate(intervals):
@@ -518,13 +545,22 @@ def build_parallel_hf_class(model_hf_tag):
                 mask[0, self.eot_token_id] = False
                 mask[0, self.eos_token_id] = False
 
-                io_name = "audio" if io_name == "continuous_audio" else io_name
+                io_name = "audio" if io_name == "discrete_audio" else io_name
                 mask = mask[None, None, :, :]
                 self.register_buffer(f"{io_name}_mask", mask)
 
-        def _step(self, input_ids, past_key_values=None, mask=None):
-            assert input_ids.size(1) == 1 and input_ids.size(2) == self.num_stream
-            input_embeds = self.model.embed_tokens(input_ids).sum(dim=2)
+        def _step(
+            self, input_ids=None, input_embeds=None, past_key_values=None, mask=None
+        ):
+
+            assert (input_ids is None) != (
+                input_embeds is None
+            ), "Either input_ids or input_embeds should be None"
+
+            if input_ids is not None:
+                assert input_ids.size(2) == self.num_stream
+                input_embeds = self.model.embed_tokens(input_ids).sum(dim=2)
+
             output = self.model(
                 inputs_embeds=input_embeds,
                 past_key_values=past_key_values,
@@ -543,13 +579,19 @@ def build_parallel_hf_class(model_hf_tag):
             return logits, past_key_values
 
         def _select_cache(self, cache, indices):
-            retval = list()
-            for layer_value in cache:
-                key, value = layer_value
+            assert isinstance(cache, DynamicCache), "KV-Cache should be DynamicCache"
+            new_cache = DynamicCache()
+
+            for layer_idx, (key, value) in enumerate(cache):
                 key = key[indices]
                 value = value[indices]
-                retval.append((key, value))
-            return tuple(retval)
+                new_cache.update(
+                    key_states=key,
+                    value_states=value,
+                    layer_idx=layer_idx,
+                )
+
+            return new_cache
 
         def _logits_to_token(self, logits, temperature, topk):
             if temperature == 0:  # greedy

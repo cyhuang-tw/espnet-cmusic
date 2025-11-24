@@ -7,16 +7,15 @@
 import argparse
 import json
 import logging
-import multiprocessing as mp
+import random
 import sys
-import threading
-import time
 from pathlib import Path
-from queue import Empty
 
+import numpy as np
 import torch
-import torch.multiprocessing as torch_mp
+import torch.multiprocessing as mp
 import yaml
+import soundfile as sf
 
 from espnet2.speechlm.dataloader.iterator import DataIteratorFactory
 from espnet2.speechlm.model import _all_job_types
@@ -72,16 +71,31 @@ def get_parser() -> argparse.ArgumentParser:
         default=4,
         help="Number of worker processes for inference",
     )
+    parser.add_argument(
+        "--rank",
+        type=int,
+        help="GPU rank in the whole inference job",
+    )
+    parser.add_argument(
+        "--world-size",
+        type=int,
+        help="number of GPUs in the whole inference job",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible inference",
+    )
 
     return parser
 
 
-def setup_worker_logger(rank: int, output_dir: Path) -> logging.Logger:
+def setup_worker_logger(rank: int) -> logging.Logger:
     """Set up logger for worker process.
 
     Args:
         rank: Worker rank/ID
-        output_dir: Directory to save log files
 
     Returns:
         Configured logger instance
@@ -109,7 +123,19 @@ def setup_worker_logger(rank: int, output_dir: Path) -> logging.Logger:
 
 
 def load_checkpoint(model, checkpoint_path):
-    """Load model checkpoint."""
+    """Load model checkpoint.
+
+    Args:
+        model: The model instance to load weights into.
+        checkpoint_path: Path to the checkpoint file containing model weights.
+
+    Returns:
+        The model instance with loaded weights.
+
+    Raises:
+        KeyError: If 'module' key is not found in checkpoint.
+        RuntimeError: If checkpoint loading fails or state dict doesn't match.
+    """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     state_dict = checkpoint["module"]
     model.load_state_dict(state_dict, strict=True)
@@ -125,11 +151,22 @@ def inference_worker(
     unregistered_specifier: str,
     registered_specifier: str,
     output_dir: Path,
+    seed: int,
 ):
     """Worker process for inference with data sharding."""
     # Set up logger for this worker
-    logger = setup_worker_logger(rank, output_dir)
+    logger = setup_worker_logger(rank)
     logger.info(f"Starting inference worker (rank {rank}/{world_size})")
+
+    # Set random seeds for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    logger.info(f"Random seed set to {seed}")
+
+    torch.cuda.set_device("cuda:0")
 
     # Load configs in worker
     with open(train_config_path, "r") as f:
@@ -139,7 +176,7 @@ def inference_worker(
         inference_config = yaml.safe_load(f)
 
     job_template_class = _all_job_types[train_config["job_type"]]
-    job_template = job_template_class(train_config, is_train=True)
+    job_template = job_template_class(train_config, is_train=False)
 
     # Build model and preprocessor in worker
     model = job_template.build_model()
@@ -162,8 +199,12 @@ def inference_worker(
         sequential_load=True,
     )
 
-    # Process this worker's shard
+    output_dir = output_dir / f"inference_rank{rank}"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    output_file = output_dir / "results.json"
+
     test_iterator = iterator_factory.build_iter()
+    results = dict()
     logger.info("Starting inference on data shard")
 
     for idx, sample in enumerate(test_iterator):
@@ -171,22 +212,40 @@ def inference_worker(
         task, data_name, example_id = sample.pop("keys")[0]
 
         logger.info(f"Processing sample {idx}: {task}/{data_name}/{example_id}")
-        messages = model.inference(inference_config, **sample)
-        assert 1 == 2
+        messages, _ = model.inference(inference_config, **sample)
 
-    logger.info(f"Worker {rank} completed successfully")
+        for idx, (role, modality, content) in enumerate(messages):
+            if modality == "audio":
+                audio, length, sample_rate = content
+                audio, length = audio[0], length[0]
+                audio = audio.cpu().numpy()
+
+                content = output_dir / f"{example_id}_segment{idx+1}.wav"
+                sf.write(content, audio.T, sample_rate)
+
+                messages[idx][2] = str(content)
+
+            logger.info(
+                f"Segment {idx}, role={role}, modality={modality}, content={content}"
+            )
+
+        results[example_id] = messages
+        with open(output_file, "wb") as writer:
+            writer.write(
+                json.dumps(
+                    results, indent=4, ensure_ascii=False, sort_keys=False
+                ).encode("utf_8")
+            )
 
 
 def main():
     parser = get_parser()
     args = parser.parse_args()
 
-    # Enforce GPU availability
     if not torch.cuda.is_available():
         print("Error: CUDA is not available. This script requires GPU.")
         sys.exit(1)
 
-    # Validate that exactly one specifier is provided
     if not args.test_registered_specifier and not args.test_unregistered_specifier:
         parser.error(
             "Provide either --test-registered-specifier or "
@@ -200,29 +259,25 @@ def main():
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"Workers: {args.num_workers}")
-    print(
-        f"Specifier: {args.test_unregistered_specifier or args.test_registered_specifier}"
-    )
+    mp.set_start_method("spawn", force=True)
 
-    # Enable spawn for CUDA
-    torch_mp.set_start_method("spawn", force=True)
-
-    # Start worker processes (all configs will be loaded in workers)
     processes = []
-    for rank in range(args.num_workers):
+    args.rank -= 1  # Rank provided from 1 rather than 0
+    start_rank = args.rank * args.num_workers
+    end_rank = (args.rank + 1) * args.num_workers
+    for rank in range(start_rank, end_rank):
         p = mp.Process(
             target=inference_worker,
             args=(
                 rank,
-                args.num_workers,
+                args.world_size * args.num_workers,
                 args.train_config,
                 args.inference_config,
                 args.model_checkpoint,
                 args.test_unregistered_specifier or "",
                 args.test_registered_specifier or "",
                 args.output_dir,
+                args.seed,
             ),
         )
         p.start()

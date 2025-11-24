@@ -126,11 +126,12 @@ class DialogueReader:
                     # Single channel - add channel dimension
                     audio_data = audio_data[np.newaxis, :]
                 elif audio_data.ndim == 2:
-                    # Multi-channel - transpose from [samples, channels] to [channels, samples]
+                    # Multi-channel: [samples, channels] -> [channels, samples]
                     audio_data = audio_data.T
                 else:
                     raise ValueError(
-                        f"Unexpected audio shape at index {i} for {key}: {audio_data.shape}"
+                        f"Unexpected audio shape at index {i} for {key}: "
+                        f"{audio_data.shape}"
                     )
 
                 processed_content = (audio_data, sample_rate)

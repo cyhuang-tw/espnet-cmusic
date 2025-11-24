@@ -5,7 +5,7 @@ set -e
 set -u
 set -o pipefail
 
-stage=2
+stage=3
 stop_stage=100
 
 num_nodes=1
@@ -20,14 +20,18 @@ valid_unregistered_specifier="audio_to_text:librispeech_dev:manifest/dev/dataset
 test_unregistered_specifier="audio_to_text:librispeech_test_clean:manifest/test_clean/dataset.json"
 
 # TTS
-# train_unregistered_specifier="text_to_audio:librispeech_train_960:manifest/train_960/dataset.json"
-# valid_unregistered_specifier="text_to_audio:librispeech_dev:manifest/dev/dataset.json"
-# test_unregistered_specifier="text_to_audio:librispeech_test_clean:manifest/test_clean/dataset.json"
+train_unregistered_specifier="text_to_audio:librispeech_train_960:manifest/train_960/dataset.json"
+valid_unregistered_specifier="text_to_audio:librispeech_dev:manifest/dev/dataset.json"
+test_unregistered_specifier="text_to_audio:librispeech_test_clean:manifest/test_clean/dataset.json"
 
 train_config=conf/train.yaml
-inference_config=conf/inference.yaml
+
 stats_dir=exp/stats
-exp_dir=exp/librispeech_asr
+exp_dir=exp/librispeech_tts
+
+inference_config=conf/inference.yaml
+inference_step=50000
+inference_nj=1
 
 . utils/parse_options.sh
 
@@ -60,13 +64,21 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-  inference_step=60000
   inference_tag=$(basename "${inference_config%.*}")
-  python ../../../espnet2/speechlm/bin/inference.py \
-    --train-config ${train_config} \
-    --inference-config ${inference_config} \
-    --model-checkpoint ${exp_dir}/checkpoints/step_${inference_step}/global_step60000/mp_rank_00_model_states.pt \
-    --output-dir ${exp_dir}/inference/step_${inference_step} \
-    --test-registered-specifier ${test_registered_specifier} \
-    --num-worker 1
+
+  inference_dir=${exp_dir}/inference/${inference_tag}_step_${inference_step}
+  mkdir -p ${inference_dir}
+
+  inference_ckpt=${exp_dir}/checkpoints/step_${inference_step}/global_step${inference_step}/mp_rank_00_model_states.pt
+
+  echo "Start model inference. Log at ${inference_dir}/logs/inference.*.log"
+  ${cuda_cmd} JOB=1:${inference_nj} ${inference_dir}/logs/inference.JOB.log \
+    ../../../espnet2/speechlm/bin/inference.py \
+      --rank JOB --world-size ${inference_nj} \
+      --train-config ${train_config} \
+      --inference-config ${inference_config} \
+      --model-checkpoint ${inference_ckpt} \
+      --output-dir ${inference_dir} \
+      --test-unregistered-specifier ${test_unregistered_specifier} \
+      --num-worker 1
 fi

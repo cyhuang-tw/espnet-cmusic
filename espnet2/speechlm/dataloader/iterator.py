@@ -121,7 +121,9 @@ class DataIteratorFactory:
         self.dataset = dataset
 
         if self.sequential_load:
-            assert self.num_workers == 0, "No multiple workers during sequential loading"
+            assert (
+                self.num_workers == 0
+            ), "No multiple workers during sequential loading"
 
             all_subsets = dataset.get_all_examples()
             self.batched_examples = []
