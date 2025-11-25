@@ -8,3 +8,4 @@ joblib
 typeguard
 humanfriendly
 librosa
+wandb

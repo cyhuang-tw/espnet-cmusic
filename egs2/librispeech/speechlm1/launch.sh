@@ -5,11 +5,11 @@ set -e
 set -u
 set -o pipefail
 
-stage=3
+stage=1
 stop_stage=100
 
 num_nodes=1
-num_proc_per_node=2
+num_proc_per_node=1
 node_rank=0
 master_addr=localhost
 master_port=12346

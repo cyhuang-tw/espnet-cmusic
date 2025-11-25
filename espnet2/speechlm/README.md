@@ -27,7 +27,7 @@ pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https
 pip install -r requirement.txt
 ```
 
-(5) Install Flash attention
+(5) Install Flash attention. Recommend to build from source
 ```bash
 # from pre-built wheel
 pip install flash-attn --no-build-isolation 
