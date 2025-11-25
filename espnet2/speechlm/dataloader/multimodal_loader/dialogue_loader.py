@@ -6,64 +6,31 @@
 
 import json
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Any, ItemsView, KeysView, List, Optional, Tuple, Union, ValuesView
 
 import numpy as np
 import soundfile as sf
 
 
 class DialogueReader:
-    """Dict-like dialogue reader for multimodal conversation data.
-
-    Loads dialogue data from a folder containing JSON files. Each JSON file
-    contains a dictionary mapping example_id to messages, where messages is a
-    list of triplet tuples: (role, modality, content).
-
-    Format:
-    - Each .json file contains: {example_id: [(role, modality, content), ...]}
-    - role: Must be one of ["user", "assistant", "system"]
-    - modality: Must be one of ["text", "audio"]
-    - content:
-        - For text: string content
-        - For audio: path to audio file (will be loaded as numpy array)
-
-    Args:
-        dialogue_folder: Path to folder containing .json dialogue files
-        valid_ids: List of valid IDs to keep (optional, keeps all if None)
-    """
 
     VALID_ROLES = {"user", "assistant", "system"}
-    VALID_MODALITIES = {"text", "audio"}
+    VALID_MODALITIES = {"text", "audio", "image", "video", "toolcall"}
 
-    def __init__(self, dialogue_folder: str, valid_ids: Optional[List[str]] = None):
+    def __init__(self, dialogue_file: str, valid_ids: Optional[List[str]] = None):
         self.dialogues = {}
-        dialogue_path = Path(dialogue_folder)
 
-        assert dialogue_path.exists(), f"Dialogue folder not found: {dialogue_folder}"
-        assert dialogue_path.is_dir(), f"Expected a folder, but got: {dialogue_folder}"
+        valid_ids = set(valid_ids) if valid_ids is not None else None
+        for idx, line in enumerate(open(dialogue_file)):
+            line = json.loads(line)
 
-        # Convert valid_ids to set for faster lookup
-        valid_ids_set = set(valid_ids) if valid_ids else None
+            if not ("example_id" in line and "messages" in line):
+                raise ValueError(f"Line {idx} of file {dialogue_file} is invalid")
 
-        # Find and load all .json files in the folder
-        json_files = list(dialogue_path.glob("*.json"))
-        assert json_files, f"No .json files found in {dialogue_folder}"
+            if valid_ids is not None and line["example_id"] not in valid_ids:
+                continue
 
-        for json_file in json_files:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            assert isinstance(
-                data, dict
-            ), f"Invalid format in {json_file}: expected dict, got {type(data)}"
-
-            for example_id, messages in data.items():
-                # Skip if not in valid_ids
-                if valid_ids_set and example_id not in valid_ids_set:
-                    continue
-
-                # Store raw messages - validation happens in __getitem__
-                self.dialogues[example_id] = messages
+            self.dialogues[line["example_id"]] = line["messages"]
 
     def __getitem__(
         self, key: str
@@ -83,15 +50,6 @@ class DialogueReader:
 
         validated = []
         for i, msg in enumerate(messages):
-            # Convert list to tuple if necessary
-            if isinstance(msg, list):
-                msg = tuple(msg)
-
-            assert isinstance(msg, tuple) and len(msg) == 3, (
-                f"Invalid message at index {i} for {key}: "
-                f"expected (role, modality, content) triplet"
-            )
-
             role, modality, content = msg
 
             assert role in self.VALID_ROLES, (
@@ -114,9 +72,6 @@ class DialogueReader:
             elif modality == "audio":
                 # Load audio file
                 audio_path = Path(content)
-                assert (
-                    audio_path.exists()
-                ), f"Audio file not found at index {i} for {key}: {content}"
 
                 # Load audio using soundfile
                 audio_data, sample_rate = sf.read(audio_path, dtype="float32")
@@ -148,16 +103,16 @@ class DialogueReader:
         """Return number of dialogues."""
         return len(self.dialogues)
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         """Return iterator over IDs."""
         return self.dialogues.keys()
 
-    def values(self):
+    def values(self) -> ValuesView[List[Any]]:
         """Return iterator over dialogues."""
         # Note: returns raw values without validation
         return self.dialogues.values()
 
-    def items(self):
+    def items(self) -> ItemsView[str, List[Any]]:
         """Return iterator over (id, dialogue) pairs."""
         # Note: returns raw items without validation
         return self.dialogues.items()

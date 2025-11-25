@@ -15,12 +15,14 @@ from torch.utils.data import Dataset
 
 from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import LhotseAudioReader
 from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
+from espnet2.speechlm.dataloader.multimodal_loader.dialogue_loader import DialogueReader
 
 logger = logging.getLogger(__name__)
 
 reader_types = {
     "lhotse_audio": LhotseAudioReader,
     "text": TextReader,
+    "dialogue": DialogueReader,
 }
 
 # TODO(Jinchuan): revisit the CPU memory usage for large-scale training. Check official

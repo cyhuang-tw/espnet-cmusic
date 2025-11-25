@@ -398,9 +398,7 @@ class SpeechLMPreprocessor:
                     "If dialogue exist, there should be no more other entries"
                 )
             if not self.is_train:
-                assert all(
-                    [msg[0] != "assistant" for msg in data_dict["dialogue"]]
-                ), (
+                assert all([msg[0] != "assistant" for msg in data_dict["dialogue"]]), (
                     "during inference, input dialogue should not contain "
                     "model output (assistant message)"
                 )
