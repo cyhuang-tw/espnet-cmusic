@@ -1,6 +1,6 @@
 psutil
 deepspeed
-transformers
+transformers==4.57.1
 huggingface-hub
 lhotse
 pyyaml

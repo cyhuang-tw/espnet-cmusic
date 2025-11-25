@@ -37,12 +37,6 @@ cd flash-attention
 python setup.py install
 ```
 
-(6) Install the whole ESPnet. This is only to use the Codec and SSL model from ESPnet. We can avoid this step later by using X-Codec
-```bash
-cd <espnet_root>
-pip install -e ".[train, recipe]"
-```
-
 ### Launch the training
 (1) go to the directory.
 ```bash
