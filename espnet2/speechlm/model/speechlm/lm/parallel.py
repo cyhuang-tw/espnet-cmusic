@@ -459,23 +459,33 @@ def build_parallel_hf_class(model_hf_tag):
             this_config = config[modality]
 
             # (3) preprocess for multi-hypothesis inference and CFG
-            if config["num_hypo"] > 1:
-                indices = torch.zeros(config["num_hypo"]).long().to(device)
-                cache = self._select_cache(cache, indices)
-                modality_token = modality_token.tile(config["num_hypo"], 1, 1)
+            num_hypo = config.get("num_hypo", 1)
+            if num_hypo > 1:
+                indices = torch.zeros(num_hypo).long().to(device)
+                cache.batch_select_indices(indices)
+                modality_token = modality_token.tile(num_hypo, 1, 1)
 
-            if this_config.get("cfg", 1) > 1:
-                raise NotImplementedError("CFG is not implemented yet")
+            cfg = this_config.get("cfg", 1)
+            if cfg > 1:
+                cache = self._prepare_cfg_cache(cache)
 
             # (4) Inference loop
             hypos = list()
-            finish_idx = torch.ones(config["num_hypo"]).long().to(device) * -1
+            finish_idx = torch.ones(num_hypo).long().to(device) * -1
             prev_token = modality_token
             for step in range(this_config["max_step"]):
                 # (4.1) Model inference
+                if cfg > 1:
+                    prev_token = prev_token.tile(2, 1, 1)
+
                 logits, cache = self._step(
                     input_ids=prev_token, past_key_values=cache, mask=modality_mask
                 )
+
+                if cfg > 1:
+                    logits, cfg_logits = logits.chunk(2)
+                    logits = logits * cfg + cfg_logits * (1 - cfg)
+                    logits.masked_fill_(modality_mask, float("-inf"))
 
                 # (4.2) token prediction based on logits
                 prev_token = self._logits_to_token(
@@ -501,6 +511,10 @@ def build_parallel_hf_class(model_hf_tag):
             # (5) Finalize
             finish_idx = torch.where(finish_idx == -1, step, finish_idx)
             hypos = torch.cat(hypos, dim=1)
+
+            if cfg > 1:
+                indices = torch.arange(num_hypo).long().to(device)
+                cache.batch_select_indices(indices)
 
             # NOTE(Jinchuan): Prefill the last token. This is effective only for
             # multi-segment inference with batch size of 1
@@ -578,21 +592,6 @@ def build_parallel_hf_class(model_hf_tag):
 
             return logits, past_key_values
 
-        def _select_cache(self, cache, indices):
-            assert isinstance(cache, DynamicCache), "KV-Cache should be DynamicCache"
-            new_cache = DynamicCache()
-
-            for layer_idx, (key, value) in enumerate(cache):
-                key = key[indices]
-                value = value[indices]
-                new_cache.update(
-                    key_states=key,
-                    value_states=value,
-                    layer_idx=layer_idx,
-                )
-
-            return new_cache
-
         def _logits_to_token(self, logits, temperature, topk):
             if temperature == 0:  # greedy
                 return logits.argmax(-1)
@@ -603,5 +602,41 @@ def build_parallel_hf_class(model_hf_tag):
                     probs.flatten(end_dim=-2), num_samples=1
                 ).view(probs[..., :1].size())
                 return torch.gather(topk_indices, -1, inner_indices).squeeze(-1)
+
+        def _prepare_cfg_cache(self, cache):
+            assert isinstance(cache, DynamicCache)
+
+            device = cache.layers[0].keys.device
+            length = cache.get_seq_length()
+            batch_size = cache.layers[0].keys.shape[0]
+
+            zeros = torch.zeros((batch_size, length, self.num_stream))
+            zeros = zeros.to(device).long()
+
+            _, cfg_cache = self._step(input_ids=zeros)
+
+            combined_cache = DynamicCache()
+            for idx in range(len(cache.layers)):
+                key = torch.cat(
+                    [
+                        cache.layers[idx].keys,
+                        cfg_cache.layers[idx].keys,
+                    ],
+                    dim=0,
+                )
+                value = torch.cat(
+                    [
+                        cache.layers[idx].values,
+                        cfg_cache.layers[idx].values,
+                    ],
+                    dim=0,
+                )
+                combined_cache.update(
+                    key_states=key,
+                    value_states=value,
+                    layer_idx=idx,
+                )
+
+            return combined_cache
 
     return ParallelLLM
