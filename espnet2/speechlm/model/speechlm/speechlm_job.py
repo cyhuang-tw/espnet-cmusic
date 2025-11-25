@@ -6,7 +6,7 @@
 
 import re
 from typing import Any, Callable, Dict
-
+import random
 import numpy as np
 import torch
 
@@ -122,6 +122,7 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             audio_output=processor_config["audio_output"],
             loss_region=processor_config["loss_region"],
             batchfy_method=self.config["data_loading"].get("batchfy_method", "bucket"),
+            audio_cfg=processor_config.get("audio_cfg", 0.0),
         )
 
     def build_model(self) -> torch.nn.Module:
@@ -165,6 +166,7 @@ class SpeechLMPreprocessor:
         audio_output: str = "discrete_audio",
         loss_region: str = "assistant",
         batchfy_method: str = "bucket",
+        audio_cfg: float = 0.0,
     ):
         self.is_train = is_train
 
@@ -174,6 +176,7 @@ class SpeechLMPreprocessor:
         self.audio_output = audio_output
         self.loss_region = loss_region
         self.batchfy_method = batchfy_method
+        self.audio_cfg = audio_cfg
 
         # (2) vocabulary
         self.vocab = vocab
@@ -328,7 +331,10 @@ class SpeechLMPreprocessor:
             loss_masks.append(special_mask)
             accum_length += 1
 
-        # TODO(speechlm): Add CFG here
+        if random.random() < self.audio_cfg and self.is_train:
+            seq, loss_masks, conti_feats = self._apply_cfg(
+                seq, loss_masks, conti_feats, messages
+            )
 
         # (4) concat
         seq = np.concatenate(seq, axis=0)
@@ -340,7 +346,7 @@ class SpeechLMPreprocessor:
             "loss_mask": loss_mask,
         }
 
-        # self.diagnose(data) # comment this for debug
+        # self.diagnose(data) # uncomment this for debug
         return data
 
     def diagnose(self, data):
@@ -427,3 +433,33 @@ class SpeechLMPreprocessor:
                 message = (role, this_io, this_data)
                 messages.append(message)
             return messages
+
+    def _apply_cfg(self, seq, loss_masks, conti_feats, messages):
+        audio_idx = [
+            i
+            for i, (role, modality, _) in enumerate(messages)
+            if role == "assistant" and modality == self.audio_output
+        ]
+
+        if len(audio_idx) == 0:  # If no valid audio output segment, keep untouched
+            return seq, loss_masks, conti_feats
+
+        # NOTE(Jinchuan): Only randomly keep one audio output segment, and keep all
+        # other segments as 0
+        # NOTE(Jinchuan): seq and loss_masks: start with an BOS;
+        # Each segment contains 4 items: 3 special tokens + 1 real segment
+        audio_idx = random.choice(audio_idx)
+        for i in range(len(messages)):
+            if i == audio_idx:
+                continue
+
+            for j in range(4):
+                k = i * 4 + j + 1
+                seq[k] *= 0
+                loss_masks[k] *= 0
+
+        seq[0] *= 0
+        loss_masks[0] *= 0
+        conti_feats = [feat for feat in conti_feats if feat[0] == self.audio_output]
+
+        return seq, loss_masks, conti_feats
