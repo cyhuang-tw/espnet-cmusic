@@ -78,6 +78,10 @@ def batchfy_pack(
     Returns:
         List of batches, where each batch is a list of keys.
     """
+
+    # NOTE(Jinchuan): This function is currently very inefficient. Need further
+    # optimization in the future.
+
     # Sort keys by length in descending order (largest first)
     sorted_keys = sorted(keys, key=lambda k: key_to_length[k], reverse=True)
 

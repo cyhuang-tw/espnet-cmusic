@@ -218,8 +218,8 @@ class SpeechLMPreprocessor:
         The return dict value should always in the format of either tensor or
         list of strings. No nested format is allowed.
         """
-        if self.batchfy_method != "bucket":
-            raise NotImplementedError("Only bucket collate function is implemented")
+        if self.batchfy_method not in ["bucket", "pack"]:
+            raise NotImplementedError("Batchfy method only support bucket and pack")
 
         return_dict = dict()
 
@@ -227,26 +227,41 @@ class SpeechLMPreprocessor:
         data_dicts = [self.preprocessing(key, data_dict) for key, data_dict in data_lst]
         return_dict["keys"] = [key for key, _ in data_lst]
 
-        # (2) discrete token sequences
-        seqs, conti_feats, loss_masks = [], [], []
-        for bidx, data_dict in enumerate(data_dicts):
-            seqs.append(data_dict["sequence"])
-            loss_masks.append(data_dict["loss_mask"])
+        # (2) Process token sequences and masks
+        seqs, loss_masks, seq_lens, position_ids = [], [], [0], []
+        for data_dict in data_dicts:
+            seq, loss_mask = data_dict["sequence"], data_dict["loss_mask"]
+            seqs.append(torch.from_numpy(seq))
+            loss_masks.append(torch.from_numpy(loss_mask))
+            seq_lens.append(seq_lens[-1] + len(seq))
+            position_ids.append(torch.arange(len(seq)).long())
 
-            for conti_feat in data_dict["conti_feats"]:
-                conti_feats.append((bidx,) + conti_feat)
+        if self.batchfy_method == "bucket":
+            seqs, _ = pad_list(seqs)
+            loss_masks, _ = pad_list(loss_masks)
 
-        return_dict["seqs"], _ = pad_list(seqs)
-        if self.is_train:
-            return_dict["loss_masks"], _ = pad_list(loss_masks)
+        else:  # "pack"
+            seqs = torch.cat(seqs, dim=0).unsqueeze(0)
+            loss_masks = torch.cat(loss_masks, dim=0).unsqueeze(0)
+            position_ids = torch.cat(position_ids, dim=0)
+            return_dict["position_ids"] = position_ids.unsqueeze(0)
 
-        # (3) continuous features
+        return_dict["seqs"] = seqs
+        return_dict["loss_masks"] = loss_masks
+
+        # (3) Process continuous feats
         conti_feats_dict = dict()
-        for bidx, this_io, start, length, feat in conti_feats:
-            if this_io not in conti_feats_dict:
-                conti_feats_dict[this_io] = [[], []]
-            conti_feats_dict[this_io][0].append((bidx, start, length))
-            conti_feats_dict[this_io][1].append(feat)
+        for b_idx, (data_dict, seq_start) in enumerate(zip(data_dicts, seq_lens[:-1])):
+            for this_io, start, length, feat in data_dict["conti_feats"]:
+                if self.batchfy_method == "pack":
+                    b_idx = 0
+                    start = start + seq_start
+
+                if this_io not in conti_feats_dict:
+                    conti_feats_dict[this_io] = [[], []]  # (b_idx, start, length), feat
+
+                conti_feats_dict[this_io][0].append((b_idx, start, length))
+                conti_feats_dict[this_io][1].append(feat)
 
         for this_io, (indices, feats) in conti_feats_dict.items():
             return_dict[f"{this_io}_indices"] = torch.Tensor(indices).long()
