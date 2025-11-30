@@ -7,6 +7,11 @@ from pathlib import Path
 
 from datasets import load_dataset
 
+from espnet2.speechlm.utils.parquet_dump import ArkiveWriter
+
+CHUNK_SIZE = 10000
+MAX_WORKERS = 64
+BATCH_SIZE = CHUNK_SIZE * MAX_WORKERS
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -46,8 +51,8 @@ def process_olmo3(example):
 
         msg = (role, modality, content)
         new_messages.append(msg)
-    
-    return {"example_id": example_id, "messages": new_messages}
+
+    return {example_id: json.dumps(new_messages)}
 
 process_methods = {
     "allenai/Dolci-Instruct-SFT": process_olmo3,
@@ -71,24 +76,34 @@ def load_and_parse_dataset(dataset_name: str, output_dir: Path):
 
     # Load all available splits
     dataset = load_dataset(dataset_name, num_proc=16)
-    porcess_method = process_methods[dataset_name]
+    process_method = process_methods[dataset_name]
 
     for split_name, split_data in dataset.items():
         print(f"  Processing split: {split_name} ({len(split_data)} examples)")
 
-        output_file = dataset_output_dir / f"{split_name}.jsonl"
-        writer = open(output_file, 'w')
+        split_dir = dataset_output_dir / split_name
+        writer = ArkiveWriter(
+            output_dir=split_dir,
+            data_name=f"{dataset_slug}_{split_name}",
+            data_type="text",
+            target_format="string",
+            chunk_size=CHUNK_SIZE,
+            max_workers=MAX_WORKERS,
+        )
+        
+        data_dict = dict()
+        for idx, example in enumerate(split_data, 1):
+            example = process_method(example)
+            if example is not None:
+                data_dict.update(example)
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            for example in split_data:
-                example = porcess_method(example)
-
-                if example is None:
-                    continue
-
-                example = json.dumps(example)
-                writer.write(example + "\n")
-
+            if len(data_dict) == BATCH_SIZE or (idx == len(split_data) and len(data_dict) > 0):
+                print('start to dump: ', flush=True)
+                writer.write(data_dict)
+                data_dict = dict()
+            
+        writer.finalize()
+            
 
 
 def main():

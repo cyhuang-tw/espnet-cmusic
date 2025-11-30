@@ -6,6 +6,7 @@
 
 import argparse
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -184,6 +185,12 @@ def main():
     with open(args.train_config, "r") as f:
         train_config = yaml.safe_load(f)
     logger.info(f"Loaded training config from: {args.train_config}")
+
+    # Copy train config to output directory for reproducibility
+    if rank == 0:
+        config_dest = args.output_dir / 'train.yaml'
+        shutil.copy(args.train_config, config_dest)
+        logger.info(f"Copied training config to: {config_dest}")
 
     job_template_class = _all_job_types[train_config["job_type"]]
     job_template = job_template_class(train_config, is_train=True)

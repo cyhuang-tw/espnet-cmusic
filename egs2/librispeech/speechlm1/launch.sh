@@ -9,7 +9,7 @@ stage=1
 stop_stage=100
 
 num_nodes=1
-num_proc_per_node=1
+num_proc_per_node=2
 node_rank=0
 master_addr=localhost
 master_port=12346
@@ -75,7 +75,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   ${cuda_cmd} JOB=1:${inference_nj} ${inference_dir}/logs/inference.JOB.log \
     ../../../espnet2/speechlm/bin/inference.py \
       --rank JOB --world-size ${inference_nj} \
-      --train-config ${train_config} \
+      --train-config ${exp_dir}/train.yaml \
       --inference-config ${inference_config} \
       --model-checkpoint ${inference_ckpt} \
       --output-dir ${inference_dir} \
