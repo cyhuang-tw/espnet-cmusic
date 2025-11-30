@@ -13,21 +13,9 @@ from typing import Any, Dict, List, Tuple
 import yaml
 from torch.utils.data import Dataset
 
-from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import (
-    ArkiveAudioReader,
-    LhotseAudioReader,
-)
-from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
-from espnet2.speechlm.dataloader.multimodal_loader.dialogue_loader import DialogueReader
+from espnet2.speechlm.dataloader.multimodal_loader import ALL_DATA_LOADERS
 
 logger = logging.getLogger(__name__)
-
-reader_types = {
-    "arkive_audio": ArkiveAudioReader,
-    "lhotse_audio": LhotseAudioReader,
-    "text": TextReader,
-    "dialogue": DialogueReader,
-}
 
 # TODO(Jinchuan): revisit the CPU memory usage for large-scale training. Check official
 # information as follow:
@@ -86,9 +74,9 @@ class SingleDataset(Dataset):
             reader_type = entry["reader"]
 
             # Create appropriate reader with valid_ids for this rank
-            if reader_type not in reader_types:
+            if reader_type not in ALL_DATA_LOADERS:
                 raise ValueError(f"Unknown reader type: {reader_type}")
-            reader_class = reader_types[reader_type]
+            reader_class = ALL_DATA_LOADERS[reader_type]
             self.readers[name] = reader_class(path, valid_ids=self.samples)
 
     @property

@@ -10,9 +10,7 @@ import logging
 from pathlib import Path
 
 from espnet2.speechlm.dataloader.task_conf import SUPPORTED_ENTRIES
-from espnet2.speechlm.dataloader.multimodal_loader.audio_loader import LhotseAudioReader
-from espnet2.speechlm.dataloader.multimodal_loader.dialogue_loader import DialogueReader
-from espnet2.speechlm.dataloader.multimodal_loader.text_loader import TextReader
+from espnet2.speechlm.dataloader.multimodal_loader import ALL_DATA_LOADERS
 
 
 def validate_triplet(triplet: str):
@@ -86,12 +84,8 @@ def prepare_dataset_json(
         triplet_info.append({"name": name, "path": path, "reader": reader})
 
         # Create appropriate reader
-        if reader == "lhotse_audio":
-            data_sources[name] = LhotseAudioReader(path)
-        elif reader == "text":
-            data_sources[name] = TextReader(path)
-        elif reader == "dialogue":
-            data_sources[name] = DialogueReader(path)
+        reader_class = ALL_DATA_LOADERS[reader]
+        data_sources[name] = reader_class(path)
 
     # Find valid samples (those that exist in ALL data sources)
     if not data_sources:

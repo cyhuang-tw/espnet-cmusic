@@ -5,10 +5,9 @@
 """Audio data loading utilities using Lhotse library for efficient audio processing."""
 
 from pathlib import Path
-from typing import Tuple
+from typing import Iterator, Tuple
 
 import numpy as np
-import polars as pl
 
 try:
     from arkive import audio_read
@@ -33,31 +32,31 @@ except ImportError:
 
 
 class ArkiveAudioReader:
-    """Dict-like lazy audio reader using arkive parquets
+    """Dict-like lazy audio reader using arkive parquets.
 
-    This reader supports both single-channel and multi-channel audio data:
-    - Single-channel audio (MonoCut): Returns shape [1, num_samples]
-    - Multi-channel audio (MultiCut): Returns shape [num_channels, num_samples]
+    Reads audio data from arkive parquet files. Audio is accessed via byte
+    offsets and time boundaries stored in the parquet metadata.
 
-    The output shape is consistent regardless of the input type, always returning
-    a 2D array with shape [num_channels, num_samples].
+    Returns:
+        Tuple of (audio_array, sample_rate) where audio_array has shape
+        [num_samples, num_channels].
 
     Args:
-        query: SQL query to access the parquet(s). Must return the required columns:
-            [utt_id, path, start_byte_offset, file_size_bytes, start_time, end_time]
-        valid_ids: List of valid IDs to keep (optional, keeps all if None)
-        worker_id: partition ids by worker (optional, keeps all if None)
-        world_size: used for worker partitioning
+        parquet_path: Path to the parquet file containing audio metadata.
+        valid_ids: List of valid IDs to keep (optional, keeps all if None).
+        worker_id: Partition IDs by worker (optional, keeps all if None).
+        world_size: Used for worker partitioning.
     """
 
     def __init__(
         self,
-        query: str,
+        parquet_path: str,
         valid_ids: list = None,
         worker_id: int = None,
         world_size: int = None,
     ):
 
+        query = f"SELECT * FROM read_parquet('{parquet_path}')"
         result = duckdb.query(query)
 
         # filter query result before loading to df
@@ -88,7 +87,7 @@ class ArkiveAudioReader:
         }
 
     def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
-        # Get entire row as tuple (fastest)
+        """Get audio by ID. Returns (audio_array, sample_rate)."""
         idx = self.index[key]
         row = self.data.row(idx, named=True)
 
@@ -104,23 +103,25 @@ class ArkiveAudioReader:
 
     def __contains__(self, key: str) -> bool:
         """Check if ID exists in manifest."""
-        return key in self.data
+        return key in self.index
 
     def __len__(self) -> int:
         """Return number of items in manifest."""
         return len(self.data)
 
-    def keys(self):
+    def keys(self) -> Iterator[str]:
         """Return iterator over IDs."""
-        return self.data.keys()
+        return iter(self.index.keys())
 
-    def values(self):
-        """Return iterator over items."""
-        return self.data.values()
+    def values(self) -> Iterator[Tuple[np.ndarray, int]]:
+        """Return iterator over (audio_array, sample_rate) tuples."""
+        for key in self.index:
+            yield self[key]
 
-    def items(self):
-        """Return iterator over (id, item) pairs."""
-        return self.data.items()
+    def items(self) -> Iterator[Tuple[str, Tuple[np.ndarray, int]]]:
+        """Return iterator over (id, (audio_array, sample_rate)) pairs."""
+        for key in self.index:
+            yield key, self[key]
 
 
 class LhotseAudioReader:

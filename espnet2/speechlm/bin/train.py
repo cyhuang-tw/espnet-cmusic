@@ -188,7 +188,7 @@ def main():
 
     # Copy train config to output directory for reproducibility
     if rank == 0:
-        config_dest = args.output_dir / 'train.yaml'
+        config_dest = args.output_dir / "train.yaml"
         shutil.copy(args.train_config, config_dest)
         logger.info(f"Copied training config to: {config_dest}")
 
