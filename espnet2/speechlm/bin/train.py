@@ -8,6 +8,7 @@ import argparse
 import logging
 import shutil
 import sys
+import os
 from pathlib import Path
 
 import deepspeed
@@ -151,6 +152,9 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # (1) Setup distributed training first to get rank info
+    # Get local_rank from environment variable (set by torchrun) if not provided via CLI
+    if args.local_rank is None:
+        args.local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(args.local_rank)
     deepspeed.init_distributed()
 

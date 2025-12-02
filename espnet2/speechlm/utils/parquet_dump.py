@@ -14,39 +14,13 @@ def dump_arkive_singleprocess(
 ):
     writer = Arkive(str(output_dir), data_name)
     writer.append(
-        data_dict.values(),
-        utt_ids=data_dict.keys(),
+        list(data_dict.values()),
+        utt_ids=list(data_dict.keys()),
         data_type=data_type,
         compression_level=10,
         num_workers=0,
         target_format=target_format,
     )
-
-
-def dump_arkive_multiprocess(
-    output_dir,
-    data_name,
-    data_dict,
-    data_type="text",
-    target_format="string",
-    chunk_size=30000,
-    max_workers=4,
-):
-    output_dir = Path(output_dir)
-    keys = list(data_dict.keys())
-    chunks = [keys[i : i + chunk_size] for i in range(0, len(keys), chunk_size)]
-
-    args_list = []
-    for chunk_id, chunk_keys in enumerate(chunks, 1):
-        chunk_dict = {k: data_dict[k] for k in chunk_keys}
-        chunk_output_dir = output_dir / f"split_{chunk_id}"
-        chunk_output_dir.mkdir(parents=True, exist_ok=True)
-        args_list.append(
-            (chunk_output_dir, data_name, chunk_dict, data_type, target_format)
-        )
-
-    with mp.Pool(processes=max_workers) as pool:
-        pool.starmap(dump_arkive_singleprocess, args_list)
 
 
 class ArkiveWriter:
@@ -122,6 +96,7 @@ class ArkiveWriter:
         # Clean up buffer before multiprocessing to reduce memory usage
         self._buffer = {k: self._buffer[k] for k in keys_to_keep}
 
+        print('start multiprocessing writing...', flush=True)
         with mp.Pool(processes=self.max_workers) as pool:
             pool.starmap(dump_arkive_singleprocess, args_list)
 

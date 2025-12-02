@@ -106,6 +106,11 @@ def worker(
         key = tuple(key)
         stats[key] = preprocessor.find_length(key, data_dict)
 
+        if len(stats) % 1000 == 0:
+            logging.getLogger(__name__).info(
+                f"Worker {rank}: Processed {len(stats)} entries"
+            )
+
     return stats
 
 

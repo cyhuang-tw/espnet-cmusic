@@ -46,9 +46,9 @@ def validate_triplet(triplet: str):
     absolute_path = str(path_obj.resolve())
 
     # Validate reader
-    if reader not in ["lhotse_audio", "text", "dialogue"]:
+    if reader not in ALL_DATA_LOADERS:
         raise ValueError(
-            f"Invalid reader '{reader}': must be 'lhotse_audio', 'text', or 'dialogue'"
+            f"Invalid reader '{reader}': must be {', '.join(ALL_DATA_LOADERS.keys())}"
         )
 
     return name, absolute_path, reader

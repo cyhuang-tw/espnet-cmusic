@@ -9,3 +9,4 @@ typeguard
 humanfriendly
 librosa
 wandb
+polars
