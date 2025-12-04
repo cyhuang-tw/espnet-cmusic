@@ -96,7 +96,9 @@ def main():
             writer.close()
 
     if valid_ids is not None:
-        print(f"\nModified parquet saved to {args.output} ({kept_rows} rows kept out of {total_rows})")
+        print(
+            f"\nModified parquet saved to {args.output} ({kept_rows} rows kept out of {total_rows})"
+        )
     else:
         print(f"\nModified parquet saved to {args.output} ({total_rows} rows)")
 

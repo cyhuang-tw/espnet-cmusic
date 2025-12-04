@@ -103,6 +103,11 @@ def batchfy_pack(
     Returns:
         List of batches, where each batch is a list of keys.
     """
+
+    # NOTE(Jinchuan): we observe some blocky loss fluctuation during training,
+    # why may suggest the batchfy_pack would potentially have some issue. We
+    # should revisit this issue a bit later.
+
     # Convert to (length, key) tuples - avoids copying dict to workers
     items = [(key_to_length[k], k) for k in keys]
 

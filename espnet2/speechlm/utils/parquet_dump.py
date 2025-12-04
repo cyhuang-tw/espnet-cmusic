@@ -96,7 +96,7 @@ class ArkiveWriter:
         # Clean up buffer before multiprocessing to reduce memory usage
         self._buffer = {k: self._buffer[k] for k in keys_to_keep}
 
-        print('start multiprocessing writing...', flush=True)
+        print("start multiprocessing writing...", flush=True)
         with mp.Pool(processes=self.max_workers) as pool:
             pool.starmap(dump_arkive_singleprocess, args_list)
 

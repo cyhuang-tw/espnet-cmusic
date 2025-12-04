@@ -24,13 +24,16 @@ train_registered_specifier="audio_to_text:owsm_v4_caption"
 valid_registered_specifier="audio_to_text:librispeech_dev"
 
 # Rich caption - Text-to-Audio
-train_registered_specifier="text_to_audio:owsm_v4_caption"
-valid_registered_specifier="text_to_audio:librispeech_dev"
+# train_registered_specifier="text_to_audio:owsm_v4_caption"
+# valid_registered_specifier="text_to_audio:librispeech_dev"
+
+# Text-only
+train_registered_specifier="text_only:dolma3"
 
 train_config=conf/train.yaml
 
 stats_dir=exp/stats
-exp_dir=exp/owsm_text_to_audio_caption
+exp_dir=exp/owsm_audio_to_text_caption
 
 inference_config=conf/inference.yaml
 inference_step=10000
@@ -48,7 +51,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     --valid-registered-specifier "${valid_registered_specifier}" \
     --train-config ${train_config} \
     --output-dir ${stats_dir} \
-    --num-workers 256
+    --num-workers 64
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then  
@@ -82,6 +85,6 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
       --inference-config ${inference_config} \
       --model-checkpoint ${inference_ckpt} \
       --output-dir ${inference_dir} \
-      --test-registered-specifier ${test_registered_specifier} \
+      --test-registered-specifier "${test_registered_specifier}" \
       --num-worker 1
 fi
