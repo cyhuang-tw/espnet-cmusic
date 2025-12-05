@@ -34,7 +34,8 @@ def main():
     parser.add_argument(
         "--valid_ids",
         default=None,
-        help="File containing valid IDs (one per line). Only rows with these IDs are kept.",
+        help="File containing valid IDs (one per line). "
+        "Only rows with these IDs are kept.",
     )
     parser.add_argument(
         "--batch_size",
@@ -97,7 +98,8 @@ def main():
 
     if valid_ids is not None:
         print(
-            f"\nModified parquet saved to {args.output} ({kept_rows} rows kept out of {total_rows})"
+            f"\nModified parquet saved to {args.output} "
+            f"({kept_rows} rows kept out of {total_rows})"
         )
     else:
         print(f"\nModified parquet saved to {args.output} ({total_rows} rows)")

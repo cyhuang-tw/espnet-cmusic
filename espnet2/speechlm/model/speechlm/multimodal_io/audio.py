@@ -678,7 +678,7 @@ class DiscreteAudioIO(AbsIO):
         """
         wav, sr = data
         if sr != self.sample_rate:
-            raise ValueError(f"Sample rate is not compatible for discrete audio")
+            raise ValueError("Sample rate is not compatible for discrete audio")
         length = self.find_length(data)
 
         ones = np.ones((length, self.num_stream())).astype(np.int32)
