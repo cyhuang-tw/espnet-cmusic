@@ -28,12 +28,12 @@ valid_registered_specifier="audio_to_text:librispeech_dev"
 # valid_registered_specifier="text_to_audio:librispeech_dev"
 
 # Text-only
-train_registered_specifier="text_only:dolma3"
+# train_registered_specifier="text_only:dolma3"
 
 train_config=conf/train.yaml
 
 stats_dir=exp/stats
-exp_dir=exp/owsm_audio_to_text_caption
+exp_dir=exp/owsm_audio_to_text_caption_v2
 
 inference_config=conf/inference.yaml
 inference_step=10000
@@ -66,7 +66,8 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
       --valid-registered-specifier "${valid_registered_specifier}" \
       --train-config ${train_config} \
       --stats-dir ${stats_dir} \
-      --output-dir ${exp_dir} 
+      --output-dir ${exp_dir} \
+      --save-loader-state
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
