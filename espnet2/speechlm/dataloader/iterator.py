@@ -189,7 +189,27 @@ class DataIteratorFactory:
 
         logging.info(f"Overall number of batches: {len(self.batched_examples)}")
 
-    def build_iter(self, global_step: int = 0, length: int = None) -> DataLoader:
+    def build_index(self, seed: int) -> List[int]:
+        """Build a batch index ordering for a given seed.
+
+        Args:
+            seed: Random seed for shuffling. Different seeds produce
+                different orderings.
+
+        Returns:
+            List of batch indices, shuffled if self.shuffle is True.
+        """
+        index = list(range(len(self.batched_examples)))
+
+        if self.shuffle:
+            rng = random.Random(seed)
+            rng.shuffle(index)
+
+        return index
+
+    def build_iter(
+        self, global_step: int = 0, length: Optional[int] = None
+    ) -> DataLoader:
         """Get a DataLoader for a specific range of batches.
 
         Supports endless epochs by wrapping around when batches are
@@ -199,6 +219,7 @@ class DataIteratorFactory:
         Args:
             global_step: Starting batch index (must be non-negative).
             length: Number of batches to include (must be positive).
+                If None, defaults to total number of batches.
 
         Returns:
             DataLoader that iterates over the specified batch range.
@@ -208,31 +229,27 @@ class DataIteratorFactory:
         """
         total_batches = len(self.batched_examples)
 
-        if length is None:
-            length = total_batches
-
-        # Validate parameters
+        if total_batches == 0:
+            raise ValueError("No batches available")
         if global_step < 0:
             raise ValueError(f"global_step must be non-negative, got {global_step}")
-        if length <= 0:
+        if length is not None and length <= 0:
             raise ValueError(f"length must be positive, got {length}")
-        if total_batches == 0:
-            raise ValueError("No batches available. Cannot create iterator.")
 
-        # Normalize global_step to be within range
-        start_idx = global_step % total_batches
+        length = total_batches if length is None else length
 
-        # Build batch subset with wrapping
-        batch_subset = [
-            self.batched_examples[(start_idx + i) % total_batches]
-            for i in range(length)
-        ]
+        index = None
 
-        # Shuffle if needed
-        if self.shuffle:
-            rng = random.Random(self.seed + global_step)
-            rng.shuffle(batch_subset)
-            logging.info(f"Shuffled batches with seed {self.seed + global_step}")
+        batch_index = []
+        for n in range(global_step, global_step + length):
+            # Enter a new epoch, regenerate the index
+            if n % total_batches == 0 or index is None:
+                real_epoch = n // total_batches
+                index = self.build_index(self.seed + real_epoch)
+
+            batch_index.append(index[n % total_batches])
+
+        batch_subset = [self.batched_examples[n] for n in batch_index]
 
         # Calculate epoch information for logging
         start_epoch = global_step // total_batches
@@ -242,13 +259,13 @@ class DataIteratorFactory:
         if start_epoch == end_epoch:
             logging.info(
                 f"Created DataLoader with {length} batches "
-                f"(epoch {start_epoch}, steps {global_step} to {end_step})"
+                f"(epoch {start_epoch}, steps {global_step} to {end_step - 1})"
             )
         else:
             logging.info(
                 f"Created DataLoader with {length} batches "
                 f"(epochs {start_epoch} to {end_epoch}, "
-                f"steps {global_step} to {end_step})"
+                f"steps {global_step} to {end_step - 1})"
             )
 
         # Create DataLoader with batch_sampler

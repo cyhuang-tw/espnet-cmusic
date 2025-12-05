@@ -102,6 +102,12 @@ def get_parser() -> argparse.ArgumentParser:
         required=True,
         help="The folder of length statistics",
     )
+    data_group.add_argument(
+        "--save-loader-state",
+        action="store_true",
+        default=False,
+        help="Whether to save the loader state for resuming training",
+    )
 
     # Logging configuration
     log_group = parser.add_argument_group("Logging")
@@ -218,6 +224,7 @@ def main():
         rank=rank,
         world_size=world_size,
         shuffle=True,
+        save_loader_state=args.save_loader_state,
         seed=loading_config["seed"],
     )
 
