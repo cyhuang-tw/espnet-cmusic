@@ -123,6 +123,7 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             loss_region=processor_config["loss_region"],
             batchfy_method=self.config["data_loading"].get("batchfy_method", "bucket"),
             audio_cfg=processor_config.get("audio_cfg", 0.0),
+            batch_length=self.config["data_loading"].get("batch_size", -1),
         )
 
     def build_model(self) -> torch.nn.Module:
@@ -167,6 +168,7 @@ class SpeechLMPreprocessor:
         loss_region: str = "assistant",
         batchfy_method: str = "bucket",
         audio_cfg: float = 0.0,
+        batch_length: int = -1,
     ):
         self.is_train = is_train
 
@@ -177,6 +179,12 @@ class SpeechLMPreprocessor:
         self.loss_region = loss_region
         self.batchfy_method = batchfy_method
         self.audio_cfg = audio_cfg
+
+        # Use fixed batch length if using sequence pack during training
+        if is_train and batchfy_method == "pack":
+            self.batch_length = batch_length
+        else:
+            self.batch_length = -1
 
         # (2) vocabulary
         self.vocab = vocab
@@ -243,8 +251,27 @@ class SpeechLMPreprocessor:
         else:  # "pack"
             seqs = torch.cat(seqs, dim=0).unsqueeze(0)
             loss_masks = torch.cat(loss_masks, dim=0).unsqueeze(0)
-            position_ids = torch.cat(position_ids, dim=0)
-            return_dict["position_ids"] = position_ids.unsqueeze(0)
+            position_ids = torch.cat(position_ids, dim=0).unsqueeze(0)
+
+            length_inc = 20  # length increment
+            if self.batch_length >= 0:
+                batch_length = self.batch_length
+                while batch_length < seqs.size(1):
+                    batch_length += length_inc
+                pad_size = batch_length - seqs.size(1)
+
+                seqs = torch.nn.functional.pad(
+                    seqs, (0, 0, 0, pad_size, 0, 0), value=0
+                )
+                loss_masks = torch.nn.functional.pad(
+                    loss_masks, (0, 0, 0, pad_size, 0, 0), value=0
+                )
+                # position_ids is 2D [batch, seq_len]: (0, pad_size, 0, 0)
+                position_ids = torch.nn.functional.pad(
+                    position_ids, (0, pad_size, 0, 0), value=0
+                )
+
+            return_dict["position_ids"] = position_ids
 
         return_dict["seqs"] = seqs
         return_dict["loss_masks"] = loss_masks
