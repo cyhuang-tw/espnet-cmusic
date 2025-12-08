@@ -70,21 +70,20 @@ class ArkiveTextReader:
             """
             )
 
-        self.data = result.pl()
-        self.index = {
-            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_list())
+        # Load data into dict: utt_id -> (path, start_byte_offset, file_size_bytes)
+        df = result.pl()
+        self.data = {
+            row["utt_id"]: (row["path"], row["start_byte_offset"], row["file_size_bytes"])
+            for row in df.iter_rows(named=True)
         }
+
+        del result, df
 
     def __getitem__(self, key: str) -> str:
         """Get text by ID."""
-        idx = self.index[key]
-        row = self.data.row(idx, named=True)
+        path, start_offset, file_size = self.data[key]
 
-        bin_path = row["path"]
-        start_offset = row["start_byte_offset"]
-        file_size = row["file_size_bytes"]
-
-        with open(bin_path, "rb") as f:
+        with open(path, "rb") as f:
             f.seek(start_offset)
             data_bytes = f.read(file_size)
 
@@ -93,25 +92,25 @@ class ArkiveTextReader:
         return text
 
     def __contains__(self, key: str) -> bool:
-        """Check if ID exists in manifest."""
-        return key in self.index
+        """Check if ID exists."""
+        return key in self.data
 
     def __len__(self) -> int:
-        """Return number of items in manifest."""
+        """Return number of items."""
         return len(self.data)
 
     def keys(self) -> Iterator[str]:
         """Return iterator over IDs."""
-        return iter(self.index.keys())
+        return iter(self.data.keys())
 
     def values(self) -> Iterator[str]:
         """Return iterator over text values."""
-        for key in self.index:
+        for key in self.data:
             yield self[key]
 
     def items(self) -> Iterator[Tuple[str, str]]:
         """Return iterator over (id, text) pairs."""
-        for key in self.index:
+        for key in self.data:
             yield key, self[key]
 
 

@@ -51,7 +51,9 @@ def parse_dolma3(line: str, idx: int) -> tuple:
     """
     try:
         data = json.loads(line.strip())
-        utt_id = data.get("id")
+        utt_id = data.get("id", None)
+        if utt_id is None:
+            utt_id = data.get("warc_record_id", None)
         caption = data.get("text")
         if utt_id is not None and caption is not None:
             return utt_id, caption
@@ -124,7 +126,7 @@ def process_single_file(args: tuple) -> dict:
                 if utt_id is not None and caption is not None:
                     data_dict[utt_id] = caption
 
-    print(f"File processing {file_path} is done", flush=True)
+    print(f"File processing {file_path} is done. Get samples: {len(data_dict)}", flush=True)
     return data_dict
 
 
@@ -148,7 +150,7 @@ def process_files_batch(file_paths: list, mode: str, num_workers: int) -> dict:
     combined_dict = {}
     for idx, result in enumerate(results):
         combined_dict.update(result)
-        print(f'idx: {idx} updated')
+        print(f'Rank {idx}: finished: {len(combined_dict)}')
 
     print('aggregate all results', flush=True)
     return combined_dict

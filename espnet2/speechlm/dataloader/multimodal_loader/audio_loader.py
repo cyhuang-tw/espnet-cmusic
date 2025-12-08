@@ -81,46 +81,55 @@ class ArkiveAudioReader:
             """
             )
 
-        self.data = result.pl()
-        self.index = {
-            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_list())
+        # Load data into dict: utt_id -> (path, start_byte_offset, file_size_bytes, start_time, end_time)
+        df = result.pl()
+        self.data = {
+            row["utt_id"]: (
+                row["path"],
+                row["start_byte_offset"],
+                row["file_size_bytes"],
+                row["start_time"],
+                row["end_time"],
+            )
+            for row in df.iter_rows(named=True)
         }
+
+        del result, df
 
     def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
         """Get audio by ID. Returns (audio_array, sample_rate)."""
-        idx = self.index[key]
-        row = self.data.row(idx, named=True)
+        path, start_offset, file_size, start_time, end_time = self.data[key]
 
         data = audio_read(
-            row["path"],
-            start_offset=row["start_byte_offset"],
-            file_size=row["file_size_bytes"],
-            start_time=row["start_time"],
-            end_time=row["end_time"],
+            path,
+            start_offset=start_offset,
+            file_size=file_size,
+            start_time=start_time,
+            end_time=end_time,
         )
 
         return data.array.T, data.sample_rate
 
     def __contains__(self, key: str) -> bool:
-        """Check if ID exists in manifest."""
-        return key in self.index
+        """Check if ID exists."""
+        return key in self.data
 
     def __len__(self) -> int:
-        """Return number of items in manifest."""
+        """Return number of items."""
         return len(self.data)
 
     def keys(self) -> Iterator[str]:
         """Return iterator over IDs."""
-        return iter(self.index.keys())
+        return iter(self.data.keys())
 
     def values(self) -> Iterator[Tuple[np.ndarray, int]]:
         """Return iterator over (audio_array, sample_rate) tuples."""
-        for key in self.index:
+        for key in self.data:
             yield self[key]
 
     def items(self) -> Iterator[Tuple[str, Tuple[np.ndarray, int]]]:
         """Return iterator over (id, (audio_array, sample_rate)) pairs."""
-        for key in self.index:
+        for key in self.data:
             yield key, self[key]
 
 

@@ -22,7 +22,9 @@ model:
     model_conf:
         attn_implementation: flash_attention_2
         dtype: bfloat16
+        compile_transformer_body: false
     activation_checkpointing: true
+    
 
 preprocessor:
     audio_input: continuous_audio

@@ -2,7 +2,7 @@ job_type: speechlm
 
 multimodal_io:
     text:
-        tokenizer_name: Qwen/Qwen3-1.7B
+        tokenizer_name: Qwen/Qwen2.5-1.5B
     discrete_audio:
         codec_choice: Xcodec
         codec_hf_model_tag: hf-audio/xcodec-hubert-general
@@ -18,16 +18,17 @@ multimodal_io:
 
 model:
     model_choice: parallel
-    model_hf_tag: Qwen/Qwen3-1.7B
+    model_hf_tag: Qwen/Qwen2.5-1.5B
     model_conf:
         attn_implementation: flash_attention_2
         dtype: bfloat16
+        compile_transformer_body: false
     activation_checkpointing: true
 
 preprocessor:
     audio_input: continuous_audio
     audio_output: discrete_audio
-    loss_region: all
+    loss_region: assistant
     audio_cfg: 0.05
 
 data_loading:

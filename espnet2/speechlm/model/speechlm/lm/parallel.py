@@ -52,6 +52,7 @@ def build_parallel_hf_class(model_hf_tag):
             vocab,
             vocab_intervals,
             max_loss_interval: int = 13192,
+            compile_transformer_body: bool = False,
             **kwargs,
         ):
             """Load pretrained model and adapt it for multimodal parallel processing.
@@ -166,6 +167,10 @@ def build_parallel_hf_class(model_hf_tag):
                 # Add final interval if any tokens remain
                 if end > cur_start:
                     model.loss_intervals.append((cur_start, end))
+
+            # (6) Optionally compile the transformer body for faster execution
+            if compile_transformer_body:
+                model.model = torch.compile(model.model)
 
             return model
 
