@@ -260,9 +260,7 @@ class SpeechLMPreprocessor:
                     batch_length += length_inc
                 pad_size = batch_length - seqs.size(1)
 
-                seqs = torch.nn.functional.pad(
-                    seqs, (0, 0, 0, pad_size, 0, 0), value=0
-                )
+                seqs = torch.nn.functional.pad(seqs, (0, 0, 0, pad_size, 0, 0), value=0)
                 loss_masks = torch.nn.functional.pad(
                     loss_masks, (0, 0, 0, pad_size, 0, 0), value=0
                 )

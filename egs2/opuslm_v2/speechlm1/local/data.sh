@@ -77,28 +77,49 @@ fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
     log "Stage 3: Prepare dolma3"
-    dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/text/dolma3_dolmino_mix-100B-1125
-    output_dir=${dir}/dump; mkdir -p ${output_dir}
+    text_dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/text/dolma3_dolmino_mix-100B-1125
+    dataset_dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/data_jsons/dolma3
+    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
 
-    python3 local/dump_text.py \
-        --input_dir ${dir} \
-        --output_dir ${output_dir} \
-        --mode dolma3 \
-        --file_regex '.*\.jsonl$' \
-        --num_workers 128
+    for part in `ls ${text_dir}/data | grep ingredient1`; do
+        
+        if [ -f ${dataset_dir}/${part}.json ]; then
+            echo "Already have ${dataset_dir}/${part}.json. Skip processing it"
+            continue
+        fi
+
+        echo "working on ${text_dir}/data/${part}"
+        mkdir -p ${text_dir}/data/${part}/dump
+        python3 local/dump_text.py \
+            --input_dir ${text_dir}/data/${part} \
+            --output_dir ${text_dir}/data/${part}/dump \
+            --mode dolma3 \
+            --file_regex '.*\.jsonl$' \
+            --num_workers 128
+        
+        python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+            --triplets text1,${text_dir}/data/${part}/dump/metadata.parquet,arkive_text \
+            --output_json ${dataset_dir}/${part}.json
+        
+    done
 fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     log "Stage 4: Prepare llama nemotron"
-    dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/text/llama_nemotron
-    output_dir=${dir}/dump; mkdir -p ${output_dir}
+    text_dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/text/llama_nemotron
+    dataset_dir=/mnt/home/jinchuat-andr-d6b58f/jinchuat/data/data_jsons/llama_nemotron
+    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
 
-    python3 local/dump_text.py \
-        --input_dir ${dir} \
-        --output_dir ${output_dir} \
-        --mode llama_nemotron \
-        --file_regex '.*\.jsonl$' \
-        --num_workers 8
+    # python3 local/dump_text.py \
+    #     --input_dir ${text_dir} \
+    #     --output_dir ${output_dir} \
+    #     --mode llama_nemotron \
+    #     --file_regex '.*\.jsonl$' \
+    #     --num_workers 8
+    
+    python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+        --triplets dialogue,${text_dir}/dump/metadata.parquet,arkive_dialogue \
+        --output_json ${dataset_dir}/text.json
 fi
 
 
