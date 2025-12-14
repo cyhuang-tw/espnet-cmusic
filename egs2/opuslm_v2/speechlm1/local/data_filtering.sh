@@ -17,7 +17,8 @@ stop_stage=100000
 nj=64
 
 # Input/output directories
-input_dirs=""
+text_dir=""
+audio_dir=""
 output_dir=""
 
 # Stage 1: Basic filtering parameters
@@ -41,12 +42,13 @@ max_uppercase_ratio=0.5
 log "$0 $*"
 . utils/parse_options.sh
 
-if [ -z "${input_dirs}" ]; then
-    log "Usage: $0 --input_dirs <dir1,dir2,...> --output_dir <output_dir>"
+if [ -z "${text_dir}" ]; then
+    log "Usage: $0 --text_dir <dir> --output_dir <dir> [--audio_dir <dir>]"
     log "  --stage              # Start stage (default: 1)"
     log "  --stop_stage         # Stop stage (default: 100000)"
     log "  --nj                 # Number of parallel workers (default: 64)"
-    log "  --input_dirs         # Input directories (comma or space separated)"
+    log "  --text_dir           # Input text directory"
+    log "  --audio_dir          # Input audio directory (optional)"
     log "  --output_dir         # Output directory for filtered results"
     log "  --min_caption_tokens # Min caption tokens (default: 200)"
     log "  --max_caption_tokens # Max caption tokens (default: 800)"
@@ -73,7 +75,7 @@ mkdir -p "${output_dir}"
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "Stage 1: Basic filtering (tokens, duration, repetition, lexical)"
-    log "  Input directories: ${input_dirs}"
+    log "  Text directory: ${text_dir}"
     log "  Caption tokens: ${min_caption_tokens} - ${max_caption_tokens}"
     log "  Audio duration: ${min_audio_duration}s - ${max_audio_duration}s"
     log "  Max char repetition: ${max_char_repetition}"
@@ -84,7 +86,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "  Max uppercase ratio: ${max_uppercase_ratio}"
 
     python3 local/filter_stage1.py \
-        --input_dirs "${input_dirs}" \
+        --text_dir "${text_dir}" \
         --output_file "${output_dir}/stage1_survived_ids.txt" \
         --min_caption_tokens ${min_caption_tokens} \
         --max_caption_tokens ${max_caption_tokens} \

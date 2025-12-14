@@ -317,26 +317,25 @@ def filter_single_file(args: tuple) -> Tuple[List[str], dict, Dict[str, List[dic
     return survived_ids, stats, discarded
 
 
-def find_jsonl_files(input_dirs: List[str]) -> List[str]:
-    """Find all JSONL files in the given directories.
+def find_jsonl_files(text_dir: str) -> List[str]:
+    """Find all JSONL files in the given directory.
 
     Args:
-        input_dirs: List of input directory paths.
+        text_dir: Input directory path.
 
     Returns:
         Sorted list of JSONL file paths.
     """
     jsonl_files = []
-    for input_dir in input_dirs:
-        input_path = Path(input_dir)
-        if not input_path.exists():
-            print(f"Warning: Directory {input_dir} does not exist", flush=True)
-            continue
+    input_path = Path(text_dir)
+    if not input_path.exists():
+        print(f"Warning: Directory {text_dir} does not exist", flush=True)
+        return jsonl_files
 
-        # Find all .jsonl files
-        for f in input_path.glob("**/*.jsonl"):
-            if f.is_file():
-                jsonl_files.append(str(f))
+    # Find all .jsonl files
+    for f in input_path.glob("**/*.jsonl"):
+        if f.is_file():
+            jsonl_files.append(str(f))
 
     return sorted(set(jsonl_files))
 
@@ -346,11 +345,10 @@ def main():
         description="Stage 1 filtering: Filter by caption tokens and audio duration."
     )
     parser.add_argument(
-        "--input_dirs",
+        "--text_dir",
         type=str,
-        nargs="+",
         required=True,
-        help="Input directories containing JSONL files.",
+        help="Input directory containing JSONL files.",
     )
     parser.add_argument(
         "--output_file",
@@ -439,9 +437,9 @@ def main():
     args = parser.parse_args()
 
     # Find all JSONL files
-    jsonl_files = find_jsonl_files(args.input_dirs)
+    jsonl_files = find_jsonl_files(args.text_dir)
     if not jsonl_files:
-        print("No JSONL files found in the input directories.")
+        print("No JSONL files found in the input directory.")
         return
 
     print(f"Found {len(jsonl_files)} JSONL files to process", flush=True)
