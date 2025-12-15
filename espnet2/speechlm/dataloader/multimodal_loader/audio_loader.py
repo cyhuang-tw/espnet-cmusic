@@ -4,17 +4,37 @@
 
 """Audio data loading utilities using Lhotse library for efficient audio processing."""
 
+import os
 from pathlib import Path
 from typing import Iterator, Tuple
 
 import numpy as np
-import pyarrow.parquet as pq
+import psutil
+
+
+def _get_memory_mb():
+    """Get current process memory usage in MB."""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / (1024 * 1024)
+
+
+def _log_memory(stage: str):
+    """Log memory usage at a given stage."""
+    mem_mb = _get_memory_mb()
+    print(f"[MEM] {stage}: {mem_mb:.1f} MB", flush=True)
 
 try:
     from arkive import audio_read
 except ImportError:
     raise ImportError(
         "arkive is not installed. Install at https://github.com/wanchichen/arkive"
+    )
+
+try:
+    import duckdb
+except ImportError:
+    raise ImportError(
+        "duckdb is not installed. Please install it with: pip install duckdb"
     )
 
 try:
@@ -33,83 +53,95 @@ class ArkiveAudioReader:
 
     Returns:
         Tuple of (audio_array, sample_rate) where audio_array has shape
-        [num_channels, num_samples].
+        [num_samples, num_channels].
 
     Args:
         parquet_path: Path to the parquet file containing audio metadata.
         valid_ids: List of valid IDs to keep (optional, keeps all if None).
+        worker_id: Partition IDs by worker (optional, keeps all if None).
+        world_size: Used for worker partitioning.
     """
 
     def __init__(
         self,
         parquet_path: str,
         valid_ids: list = None,
+        worker_id: int = None,
+        world_size: int = None,
     ):
+        _log_memory("ArkiveAudioReader: start")
 
-        # Convert valid_ids to set for O(1) lookup
-        valid_ids_set = set(valid_ids) if valid_ids is not None else None
+        query = f"SELECT * FROM read_parquet('{parquet_path}')"
+        result = duckdb.query(query)
+        _log_memory("ArkiveAudioReader: after duckdb.query (lazy)")
 
-        # Stream through parquet file in batches (memory efficient)
-        self.data = {}
-        parquet_file = pq.ParquetFile(parquet_path)
+        # filter query result before loading to df
+        # avoids loading the whole query result into memory
+        if valid_ids is not None:
+            result = duckdb.query(
+                f"""
+                SELECT * FROM result
+                WHERE utt_id IN ({','.join(f"'{id}'" for id in valid_ids)})
+                 """
+            )
+            _log_memory("ArkiveAudioReader: after valid_ids filter")
 
-        for batch in parquet_file.iter_batches(batch_size=10000):
-            utt_ids = batch.column("utt_id")
-            paths = batch.column("path")
-            start_offsets = batch.column("start_byte_offset")
-            file_sizes = batch.column("file_size_bytes")
-            start_times = batch.column("start_time")
-            end_times = batch.column("end_time")
+        if worker_id is not None:
+            assert (
+                world_size is not None
+            ), f"filtering by worker_id requires world_size, got {world_size}"
+            result = duckdb.query(
+                f"""
+                SELECT * FROM result
+                QUALIFY (row_number() OVER (ORDER BY utt_id) - 1)
+                % {world_size} = {worker_id}
+            """
+            )
+            _log_memory("ArkiveAudioReader: after worker_id filter")
 
-            for i in range(batch.num_rows):
-                utt_id = utt_ids[i].as_py()
+        self.data = result.pl()
+        _log_memory(f"ArkiveAudioReader: after result.pl() - {len(self.data)} rows")
 
-                # Filter by valid_ids if provided
-                if valid_ids_set is not None and utt_id not in valid_ids_set:
-                    continue
-
-                self.data[utt_id] = (
-                    paths[i].as_py(),
-                    start_offsets[i].as_py(),
-                    file_sizes[i].as_py(),
-                    start_times[i].as_py(),
-                    end_times[i].as_py(),
-                )
+        self.index = {
+            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_list())
+        }
+        _log_memory("ArkiveAudioReader: after building index")
 
     def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
         """Get audio by ID. Returns (audio_array, sample_rate)."""
-        path, start_offset, file_size, start_time, end_time = self.data[key]
+        idx = self.index[key]
+        row = self.data.row(idx, named=True)
 
         data = audio_read(
-            path,
-            start_offset=start_offset,
-            file_size=file_size,
-            start_time=start_time,
-            end_time=end_time,
+            row["path"],
+            start_offset=row["start_byte_offset"],
+            file_size=row["file_size_bytes"],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
         )
 
         return data.array.T, data.sample_rate
 
     def __contains__(self, key: str) -> bool:
-        """Check if ID exists."""
-        return key in self.data
+        """Check if ID exists in manifest."""
+        return key in self.index
 
     def __len__(self) -> int:
-        """Return number of items."""
+        """Return number of items in manifest."""
         return len(self.data)
 
     def keys(self) -> Iterator[str]:
         """Return iterator over IDs."""
-        return iter(self.data.keys())
+        return iter(self.index.keys())
 
     def values(self) -> Iterator[Tuple[np.ndarray, int]]:
         """Return iterator over (audio_array, sample_rate) tuples."""
-        for key in self.data:
+        for key in self.index:
             yield self[key]
 
     def items(self) -> Iterator[Tuple[str, Tuple[np.ndarray, int]]]:
         """Return iterator over (id, (audio_array, sample_rate)) pairs."""
-        for key in self.data:
+        for key in self.index:
             yield key, self[key]
 
 

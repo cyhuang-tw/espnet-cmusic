@@ -24,7 +24,7 @@ log "$0 $*"
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "Stage 1: Dump datasets for LAION-Audio-300M"
-    for part in 1 2 3 4; do
+    for part in 2; do
         # Audio is pre-dumpped
         audio_dir=${rootdir}/audio/laion_audio_300m_part${part}
         
@@ -32,12 +32,12 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
         text_dir=${rootdir}/rich_caption/laion_audio_300m_part${part}
         mkdir -p ${text_dir}/dump
 
-        # python3 local/dump_text.py \
-        #   --input_dir ${text_dir} \
-        #   --output_dir ${text_dir}/dump \
-        #   --mode qwen_caption \
-        #   --file_regex '^captions_rank.+\.jsonl$' \
-        #   --num_workers 128
+        python3 local/dump_text.py \
+          --input_dir ${text_dir} \
+          --output_dir ${text_dir}/dump \
+          --mode qwen_caption \
+          --file_regex '^captions_rank.+\.jsonl$' \
+          --num_workers 128
         
         # Build data json
         json_dir=${rootdir}/data_jsons/laion_audio_300m_part${part}
@@ -45,7 +45,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
         python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
             --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
                        text1,${text_dir}/dump/metadata.parquet,arkive_text \
-            --output_json ${json_dir}/caption.json
+            --output_json ${json_dir}/caption.json 
     done
 fi
 
@@ -55,12 +55,12 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
 
     # Build audio-to-rich-caption dataset json
     text_dir=${rootdir}/rich_caption/owsm_v4
-    python3 local/dump_text.py \
-        --input_dir ${text_dir} \
-        --output_dir ${text_dir}/dump \
-        --mode qwen_caption \
-        --file_regex '^captions_rank.+\.jsonl$' \
-        --num_workers 128
+    # python3 local/dump_text.py \
+    #     --input_dir ${text_dir} \
+    #     --output_dir ${text_dir}/dump \
+    #     --mode qwen_caption \
+    #     --file_regex '^captions_rank.+\.jsonl$' \
+    #     --num_workers 128
 
     json_dir=${rootdir}/data_jsons/owsm_v4; mkdir -p ${json_dir}
     python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
@@ -70,12 +70,12 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
 
     # Build audio-to-text dataset json
     text_dir=${rootdir}/text/owsm_v4
-    python3 local/dump_text.py \
-        --input_dir ${text_dir} \
-        --output_dir ${text_dir}/dump \
-        --mode kaldi \
-        --file_regex '^text$' \
-        --num_workers 128
+    # python3 local/dump_text.py \
+    #     --input_dir ${text_dir} \
+    #     --output_dir ${text_dir}/dump \
+    #     --mode kaldi \
+    #     --file_regex '^text$' \
+    #     --num_workers 128
     
     python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
         --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
