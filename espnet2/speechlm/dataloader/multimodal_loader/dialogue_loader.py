@@ -6,7 +6,17 @@
 
 import json
 from pathlib import Path
-from typing import Any, ItemsView, Iterator, KeysView, List, Optional, Tuple, Union, ValuesView
+from typing import (
+    Any,
+    ItemsView,
+    Iterator,
+    KeysView,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    ValuesView,
+)
 
 import numpy as np
 import soundfile as sf
@@ -175,12 +185,18 @@ class ArkiveDialogueLoader(ArkiveTextReader):
         messages = json.loads(text)
         return validate_and_process_messages(messages, key)
 
-    def values(self) -> Iterator[List[Tuple[str, str, Union[str, Tuple[np.ndarray, int]]]]]:
+    def values(
+        self,
+    ) -> Iterator[List[Tuple[str, str, Union[str, Tuple[np.ndarray, int]]]]]:
         """Return iterator over validated dialogue values."""
         for key in self.data:
             yield self[key]
 
-    def items(self) -> Iterator[Tuple[str, List[Tuple[str, str, Union[str, Tuple[np.ndarray, int]]]]]]:
+    def items(
+        self,
+    ) -> Iterator[
+        Tuple[str, List[Tuple[str, str, Union[str, Tuple[np.ndarray, int]]]]]
+    ]:
         """Return iterator over (id, validated_dialogue) pairs."""
         for key in self.data:
             yield key, self[key]

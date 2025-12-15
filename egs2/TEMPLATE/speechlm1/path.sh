@@ -21,7 +21,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ESPNET_DATASET_REGISTRY=
 # NOTE(Jinchuan): selectively enable this for wavlab internal usage.
 if [[ "$(hostname)" == dt* ]] || [[ "$(hostname)" == gh* ]] || [[ "$(hostname)" == gpu* ]] ; then # For Delta/DeltaAI
-    ESPNET_DATASET_REGISTRY+=":/work/nvme/bbjs/shared/data_registry/train_shared.yaml"
+    ESPNET_DATASET_REGISTRY+=":/work/nvme/bbjs/shared/data_registry/train_shared.yaml:/work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/opuslm_v2.yaml"
     ESPNET_DATASET_REGISTRY+=":/work/nvme/bbjs/shared/data_registry/valid_shared.yaml"
 fi
 

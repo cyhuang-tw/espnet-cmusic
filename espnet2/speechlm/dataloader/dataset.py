@@ -7,6 +7,7 @@
 import json
 import logging
 import os
+import gc
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
@@ -16,6 +17,7 @@ from torch.utils.data import Dataset
 from espnet2.speechlm.dataloader.multimodal_loader import ALL_DATA_LOADERS
 
 logger = logging.getLogger(__name__)
+
 
 # TODO(Jinchuan): revisit the CPU memory usage for large-scale training. Check official
 # information as follow:
@@ -54,6 +56,7 @@ class SingleDataset(Dataset):
     """
 
     def __init__(self, json_file: str, rank: int = 0, world_size: int = 1):
+
         # Load JSON
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -64,6 +67,8 @@ class SingleDataset(Dataset):
 
         # Filter samples for this rank
         self.samples = all_samples[rank::world_size]
+        del data, all_samples
+        gc.collect()  # reduce memory overhead
 
         # Build readers
         self.readers: Dict[str, Any] = {}
@@ -76,6 +81,7 @@ class SingleDataset(Dataset):
             # Create appropriate reader with valid_ids for this rank
             if reader_type not in ALL_DATA_LOADERS:
                 raise ValueError(f"Unknown reader type: {reader_type}")
+
             reader_class = ALL_DATA_LOADERS[reader_type]
             self.readers[name] = reader_class(path, valid_ids=self.samples)
 

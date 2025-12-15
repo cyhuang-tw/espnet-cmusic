@@ -27,7 +27,7 @@ class HuggingFaceTextIO(AbsIO):
                            (e.g., "bert-base-uncased", "gpt2")
         """
         super().__init__(modality="text", is_discrete=True)
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
         self.tokenizer_name = tokenizer_name
 
         # Get the actual vocabulary size from model config

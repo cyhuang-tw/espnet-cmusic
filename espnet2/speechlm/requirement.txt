@@ -10,3 +10,6 @@ humanfriendly
 librosa
 wandb
 polars
+duckdb
+datasets
+polars

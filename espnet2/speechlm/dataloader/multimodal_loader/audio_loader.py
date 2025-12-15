@@ -8,19 +8,13 @@ from pathlib import Path
 from typing import Iterator, Tuple
 
 import numpy as np
+import pyarrow.parquet as pq
 
 try:
     from arkive import audio_read
 except ImportError:
     raise ImportError(
         "arkive is not installed. Install at https://github.com/wanchichen/arkive"
-    )
-
-try:
-    import duckdb
-except ImportError:
-    raise ImportError(
-        "duckdb is not installed. Please install it with: pip install duckdb"
     )
 
 try:
@@ -39,62 +33,48 @@ class ArkiveAudioReader:
 
     Returns:
         Tuple of (audio_array, sample_rate) where audio_array has shape
-        [num_samples, num_channels].
+        [num_channels, num_samples].
 
     Args:
         parquet_path: Path to the parquet file containing audio metadata.
         valid_ids: List of valid IDs to keep (optional, keeps all if None).
-        worker_id: Partition IDs by worker (optional, keeps all if None).
-        world_size: Used for worker partitioning.
     """
 
     def __init__(
         self,
         parquet_path: str,
         valid_ids: list = None,
-        worker_id: int = None,
-        world_size: int = None,
     ):
 
-        query = f"SELECT * FROM read_parquet('{parquet_path}')"
-        result = duckdb.query(query)
+        # Convert valid_ids to set for O(1) lookup
+        valid_ids_set = set(valid_ids) if valid_ids is not None else None
 
-        # filter query result before loading to df
-        # avoids loading the whole query result into memory
-        if valid_ids is not None:
-            result = duckdb.query(
-                f"""
-                SELECT * FROM result
-                WHERE utt_id IN ({','.join(f"'{id}'" for id in valid_ids)})
-                 """
-            )
+        # Stream through parquet file in batches (memory efficient)
+        self.data = {}
+        parquet_file = pq.ParquetFile(parquet_path)
 
-        if worker_id is not None:
-            assert (
-                world_size is not None
-            ), f"filtering by worker_id requires world_size, got {world_size}"
-            result = duckdb.query(
-                f"""
-                SELECT * FROM result
-                QUALIFY (row_number() OVER (ORDER BY utt_id) - 1)
-                % {world_size} = {worker_id}
-            """
-            )
+        for batch in parquet_file.iter_batches(batch_size=10000):
+            utt_ids = batch.column("utt_id")
+            paths = batch.column("path")
+            start_offsets = batch.column("start_byte_offset")
+            file_sizes = batch.column("file_size_bytes")
+            start_times = batch.column("start_time")
+            end_times = batch.column("end_time")
 
-        # Load data into dict: utt_id -> (path, start_byte_offset, file_size_bytes, start_time, end_time)
-        df = result.pl()
-        self.data = {
-            row["utt_id"]: (
-                row["path"],
-                row["start_byte_offset"],
-                row["file_size_bytes"],
-                row["start_time"],
-                row["end_time"],
-            )
-            for row in df.iter_rows(named=True)
-        }
+            for i in range(batch.num_rows):
+                utt_id = utt_ids[i].as_py()
 
-        del result, df
+                # Filter by valid_ids if provided
+                if valid_ids_set is not None and utt_id not in valid_ids_set:
+                    continue
+
+                self.data[utt_id] = (
+                    paths[i].as_py(),
+                    start_offsets[i].as_py(),
+                    file_sizes[i].as_py(),
+                    start_times[i].as_py(),
+                    end_times[i].as_py(),
+                )
 
     def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
         """Get audio by ID. Returns (audio_array, sample_rate)."""

@@ -10,10 +10,9 @@ log() {
     echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
 }
 SECONDS=0
-
-
 stage=1
 stop_stage=100000
+rootdir=/work/nvme/bbjs/shared/opuslm_v2_data
 
 log "$0 $*"
 . utils/parse_options.sh
@@ -26,45 +25,54 @@ log "$0 $*"
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "Stage 1: Dump datasets for LAION-Audio-300M"
     for part in 1 2 3 4; do
-        dir=/work/nvme/bbjs/shared/opuslm_v2_data/rich_caption/laion_audio_300m_part${part}
-        output_dir=${dir}/dump; mkdir -p ${output_dir}
+        # Audio is pre-dumpped
+        audio_dir=${rootdir}/audio/laion_audio_300m_part${part}
+        
+        # Dump text to Arkive
+        text_dir=${rootdir}/rich_caption/laion_audio_300m_part${part}
+        mkdir -p ${text_dir}/dump
 
-        python3 local/dump_text.py \
-          --input_dir ${dir} \
-          --output_dir ${output_dir} \
-          --mode qwen_caption \
-          --file_regex '^captions_rank.+\.jsonl$' \
-          --num_workers 128
+        # python3 local/dump_text.py \
+        #   --input_dir ${text_dir} \
+        #   --output_dir ${text_dir}/dump \
+        #   --mode qwen_caption \
+        #   --file_regex '^captions_rank.+\.jsonl$' \
+        #   --num_workers 128
+        
+        # Build data json
+        json_dir=${rootdir}/data_jsons/laion_audio_300m_part${part}
+        mkdir -p ${json_dir}
+        python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+            --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
+                       text1,${text_dir}/dump/metadata.parquet,arkive_text \
+            --output_json ${json_dir}/caption.json
     done
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     log "Stage 2: Prepare OWSM v4"
-    audio_dir=/work/nvme/bbjs/shared/opuslm_v2_data/audio/owsm_v4
-    dataset_dir=/work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/owsm_v4
+    audio_dir=${rootdir}/audio/owsm_v4
 
     # Build audio-to-rich-caption dataset json
-    text_dir=/work/nvme/bbjs/shared/opuslm_v2_data/rich_caption/owsm_v4
-    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
-
+    text_dir=${rootdir}/rich_caption/owsm_v4
     python3 local/dump_text.py \
-        --input_dir ${dir} \
-        --output_dir ${output_dir} \
+        --input_dir ${text_dir} \
+        --output_dir ${text_dir}/dump \
         --mode qwen_caption \
         --file_regex '^captions_rank.+\.jsonl$' \
         --num_workers 128
 
+    json_dir=${rootdir}/data_jsons/owsm_v4; mkdir -p ${json_dir}
     python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
         --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
                    text1,${text_dir}/dump/metadata.parquet,arkive_text \
-        --output_json ${dataset_dir}/caption.json
+        --output_json ${json_dir}/caption.json
 
     # Build audio-to-text dataset json
-    text_dir=/work/nvme/bbjs/shared/opuslm_v2_data/text/owsm_v4
-    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
+    text_dir=${rootdir}/text/owsm_v4
     python3 local/dump_text.py \
         --input_dir ${text_dir} \
-        --output_dir ${output_dir} \
+        --output_dir ${text_dir}/dump \
         --mode kaldi \
         --file_regex '^text$' \
         --num_workers 128
@@ -72,19 +80,18 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
         --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
                    text1,${text_dir}/dump/metadata.parquet,arkive_text \
-        --output_json ${dataset_dir}/asr.json
+        --output_json ${json_dir}/asr.json
 fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
     log "Stage 3: Prepare dolma3"
-    text_dir=/work/nvme/bbjs/shared/opuslm_v2_data/text/dolma3_dolmino_mix-100B-1125
-    dataset_dir=/work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/dolma3
-    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
+    text_dir=${rootdir}/text/dolma3_dolmino_mix-100B-1125
+    json_dir=${rootdir}/data_jsons/dolma3; mkdir -p ${json_dir}
 
-    for part in `ls ${text_dir}/data | grep ingredient1`; do
+    for part in `ls ${text_dir}/data`; do
         
-        if [ -f ${dataset_dir}/${part}.json ]; then
-            echo "Already have ${dataset_dir}/${part}.json. Skip processing it"
+        if [ -f ${json_dir}/${part}.json ]; then
+            echo "Already have ${json_dir}/${part}.json. Skip processing it"
             continue
         fi
 
@@ -96,30 +103,56 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
             --mode dolma3 \
             --file_regex '.*\.jsonl$' \
             --num_workers 128
-        
+
         python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
             --triplets text1,${text_dir}/data/${part}/dump/metadata.parquet,arkive_text \
-            --output_json ${dataset_dir}/${part}.json
-        
+            --output_json ${json_dir}/${part}.json
     done
 fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     log "Stage 4: Prepare llama nemotron"
-    text_dir=/work/nvme/bbjs/shared/opuslm_v2_data/text/llama_nemotron
-    dataset_dir=/work/nvme/bbjs/shared/opuslm_v2_data/data_jsons/llama_nemotron
-    output_dir=${text_dir}/dump; mkdir -p ${output_dir}
+    text_dir=${rootdir}/text/llama_nemotron
+    json_dir=${rootdir}/data_jsons/llama_nemotron; mkdir -p ${json_dir}
 
-    # python3 local/dump_text.py \
-    #     --input_dir ${text_dir} \
-    #     --output_dir ${output_dir} \
-    #     --mode llama_nemotron \
-    #     --file_regex '.*\.jsonl$' \
-    #     --num_workers 8
+    python3 local/dump_text.py \
+        --input_dir ${text_dir} \
+        --output_dir ${text_dir}/dump \
+        --mode llama_nemotron \
+        --file_regex '.*\.jsonl$' \
+        --num_workers 8
     
     python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
         --triplets dialogue,${text_dir}/dump/metadata.parquet,arkive_dialogue \
-        --output_json ${dataset_dir}/text.json
+        --output_json ${json_dir}/text.json
+fi
+
+if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
+    log "Stage 5: Prepare OLMo-3 SFT data"
+
+    # allenai/Dolci-Instruct-SFT
+    text_dir=${rootdir}/text/olmo3_instruct
+    json_dir=${rootdir}/data_jsons/olmo3_instruct; mkdir -p ${json_dir}
+
+    python3 local/dump_olmo3_sft.py \
+        --output_dir ${text_dir}/dump \
+        --dataset allenai/Dolci-Instruct-SFT
+    
+    python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+        --triplets dialogue,${text_dir}/dump/metadata.parquet,arkive_dialogue \
+        --output_json ${json_dir}/text.json
+
+    # allenai/Dolci-Think-SFT-32B
+    text_dir=${rootdir}/text/olmo3_think
+    json_dir=${rootdir}/data_jsons/olmo3_think; mkdir -p ${json_dir}
+
+    python3 local/dump_olmo3_sft.py \
+        --output_dir ${text_dir}/dump \
+        --dataset allenai/Dolci-Think-SFT-32B
+    
+    python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+        --triplets dialogue,${text_dir}/dump/metadata.parquet,arkive_dialogue \
+        --output_json ${json_dir}/text.json
 fi
 
 
