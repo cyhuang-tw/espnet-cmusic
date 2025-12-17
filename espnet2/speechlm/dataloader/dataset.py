@@ -4,10 +4,12 @@
 
 """Dataset implementation for multimodal data loading in SpeechLM training."""
 
+import ctypes
+import gc
 import json
 import logging
 import os
-import gc
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
@@ -30,6 +32,20 @@ logger = logging.getLogger(__name__)
 # to replace Python objects with non-refcounted representations such as Pandas, Numpy
 #  or PyArrow objects. Check out issue #13246 for more details on why this occurs and
 #  example code for how to workaround these problems.
+
+
+def _malloc_trim():
+    """Force glibc to release freed memory back to OS.
+
+    On Linux, Python's memory allocator keeps freed memory in pools.
+    This calls malloc_trim(0) to return unused heap memory to the OS.
+    """
+    if sys.platform == "linux":
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+        except (OSError, AttributeError):
+            pass  # malloc_trim not available
 
 
 def _load_dataset_worker(args):
@@ -65,10 +81,17 @@ class SingleDataset(Dataset):
         data_entries = data["data_entry"]
         all_samples = data["samples"]
 
-        # Filter samples for this rank
-        self.samples = all_samples[rank::world_size]
+        # Filter samples for this rank.
+        # Use encode/decode to create NEW string objects in fresh contiguous memory.
+        # This allows original strings to be fully freed, avoiding fragmentation.
+        self.samples = [
+            s.encode("utf-8").decode("utf-8")
+            for s in all_samples[rank::world_size]
+        ]
+
         del data, all_samples
-        gc.collect()  # reduce memory overhead
+        gc.collect()
+        _malloc_trim()
 
         # Build readers
         self.readers: Dict[str, Any] = {}
@@ -190,7 +213,8 @@ class CombinedDataset(Dataset):
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all loading tasks
                 futures = [
-                    executor.submit(_load_dataset_worker, args) for args in worker_args
+                    executor.submit(_load_dataset_worker, args)
+                    for args in worker_args
                 ]
 
                 # Collect results as they complete

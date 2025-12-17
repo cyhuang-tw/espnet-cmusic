@@ -4,24 +4,11 @@
 
 """Audio data loading utilities using Lhotse library for efficient audio processing."""
 
-import os
 from pathlib import Path
 from typing import Iterator, Tuple
 
 import numpy as np
-import psutil
-
-
-def _get_memory_mb():
-    """Get current process memory usage in MB."""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 * 1024)
-
-
-def _log_memory(stage: str):
-    """Log memory usage at a given stage."""
-    mem_mb = _get_memory_mb()
-    print(f"[MEM] {stage}: {mem_mb:.1f} MB", flush=True)
+import pyarrow as pa
 
 try:
     from arkive import audio_read
@@ -58,54 +45,45 @@ class ArkiveAudioReader:
     Args:
         parquet_path: Path to the parquet file containing audio metadata.
         valid_ids: List of valid IDs to keep (optional, keeps all if None).
-        worker_id: Partition IDs by worker (optional, keeps all if None).
-        world_size: Used for worker partitioning.
     """
 
     def __init__(
         self,
         parquet_path: str,
         valid_ids: list = None,
-        worker_id: int = None,
-        world_size: int = None,
     ):
-        _log_memory("ArkiveAudioReader: start")
+        # Use a dedicated connection to avoid polluting global state
+        conn = duckdb.connect()
 
-        query = f"SELECT * FROM read_parquet('{parquet_path}')"
-        result = duckdb.query(query)
-        _log_memory("ArkiveAudioReader: after duckdb.query (lazy)")
-
-        # filter query result before loading to df
-        # avoids loading the whole query result into memory
+        # Register valid_ids as a table for memory-efficient filtering
+        # Avoids building a huge SQL string with millions of IDs
         if valid_ids is not None:
-            result = duckdb.query(
-                f"""
-                SELECT * FROM result
-                WHERE utt_id IN ({','.join(f"'{id}'" for id in valid_ids)})
-                 """
-            )
-            _log_memory("ArkiveAudioReader: after valid_ids filter")
+            # Create PyArrow table and register - more memory efficient
+            valid_ids_table = pa.table({"utt_id": pa.array(valid_ids)})
+            conn.register("valid_ids_tbl", valid_ids_table)
 
-        if worker_id is not None:
-            assert (
-                world_size is not None
-            ), f"filtering by worker_id requires world_size, got {world_size}"
-            result = duckdb.query(
+            # Use semi-join for efficient filtering
+            result = conn.execute(
                 f"""
-                SELECT * FROM result
-                QUALIFY (row_number() OVER (ORDER BY utt_id) - 1)
-                % {world_size} = {worker_id}
-            """
+                SELECT p.* FROM read_parquet('{parquet_path}') p
+                SEMI JOIN valid_ids_tbl v ON p.utt_id = v.utt_id
+                """
             )
-            _log_memory("ArkiveAudioReader: after worker_id filter")
+        else:
+            result = conn.execute(
+                f"SELECT * FROM read_parquet('{parquet_path}')"
+            )
 
         self.data = result.pl()
-        _log_memory(f"ArkiveAudioReader: after result.pl() - {len(self.data)} rows")
 
+        # Build index without calling to_list() to avoid extra memory copy
         self.index = {
-            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_list())
+            utt_id: idx
+            for idx, utt_id in enumerate(self.data["utt_id"].to_physical())
         }
-        _log_memory("ArkiveAudioReader: after building index")
+
+        # Clean up connection
+        conn.close()
 
     def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
         """Get audio by ID. Returns (audio_array, sample_rate)."""
