@@ -5,6 +5,7 @@ import argparse
 import base64
 import io
 import json
+import resource
 import sys
 import threading
 import queue
@@ -128,6 +129,12 @@ class ArkiveAudioReader:
     def __getitem__(self, key: str):
         path, start_byte, file_size, start_time, end_time = self.data[key]
 
+        mem_mb = _get_mem_mb()
+        if file_size > 1e8:
+            print(f'size: {file_size} | {file_size > 1e8} | mem: {mem_mb:.1f}MB',
+              flush=True)
+            return None, None
+
         # # Reconstruct path: parquet's directory + bin_filename
         # if self.parquet_dir:
         #     parquet_directory = str(Path(self.parquet_dir).parent)
@@ -208,20 +215,31 @@ _reader = None
 _client = None
 
 
+def _get_mem_mb():
+    """Get current process RSS memory usage in MB (real-time, not peak)."""
+    with open('/proc/self/statm', 'r') as f:
+        # statm: size resident shared text lib data dt (in pages)
+        resident_pages = int(f.read().split()[1])
+    page_size_kb = resource.getpagesize() / 1024
+    return resident_pages * page_size_kb / 1024
+
+
 def query_audio(utt_id: str):
     """Query the audio captioning service for a single audio sample."""
     # Threads access globals directly
     max_tokens = 1024
     try:
-        # Load audio (Thread-safe because dict access is atomic-ish and file read is OS level)
+        # Load audio (thread-safe: dict access is atomic, file read is OS level)
         audio, sample_rate = _reader[utt_id]
+
+        if audio is None:
+            return
 
         if audio.ndim > 1:
             num_samples = audio.shape[1]
         else:
             num_samples = len(audio)
         duration = num_samples / sample_rate
-        # --------------------------
 
         # --- Check audio length (skip if > 60s) ---
         if duration > 60.0:
@@ -235,9 +253,12 @@ def query_audio(utt_id: str):
             return
         # -----------------------------------------
 
-        # Convert to base64 WAV
+        # Convert to base64 WAV and free audio memory immediately
         b64_audio = audio_to_base64_wav(audio, sample_rate)
+        del audio  # Free audio array memory
+
         data_url = f"data:audio/wav;base64,{b64_audio}"
+        del b64_audio  # Free base64 string memory
 
         # Query API (httpx client is thread-safe)
         response = _client.chat.completions.create(
@@ -250,6 +271,7 @@ def query_audio(utt_id: str):
             top_p=0.95,
             max_tokens=max_tokens
         )
+        del data_url  # Free data_url string memory
 
         result = response.choices[0].message.content
 
@@ -260,7 +282,8 @@ def query_audio(utt_id: str):
                 "prompt_tokens": getattr(response.usage, 'prompt_tokens', None),
                 "completion_tokens": getattr(response.usage, 'completion_tokens', None),
                 "total_tokens": getattr(response.usage, 'total_tokens', None),
-                "prompt_tokens_details": getattr(response.usage, 'prompt_tokens_details', None)
+                "prompt_tokens_details": getattr(
+                    response.usage, 'prompt_tokens_details', None)
             }
 
         # Get finish_reason (status)
@@ -268,12 +291,14 @@ def query_audio(utt_id: str):
         if response.choices and len(response.choices) > 0:
             finish_reason = getattr(response.choices[0], 'finish_reason', None)
 
+        del response  # Free response object memory
+
         # --- Check if caption is too long (tokens >= max_tokens) ---
         if usage_info and usage_info.get('completion_tokens', 0) >= max_tokens:
             result = "skip_caption_too_long"
         # ----------------------------------------------------------
+
     except Exception as e:
-        error_msg = str(e)
         print(f"Error processing {utt_id}: {e}", file=sys.stderr)
         print(f"Fatal error detected, exiting with code 1", file=sys.stderr)
         import os

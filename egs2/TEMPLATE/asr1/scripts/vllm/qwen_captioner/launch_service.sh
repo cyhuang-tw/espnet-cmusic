@@ -2,10 +2,6 @@ echo "Loading Qwen3-captioner on 1 GPU as API service..."
 
 PORT=${1}
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-
-
 apptainer exec --cleanenv --nv \
   -B /work \
   "/work/nvme/bbjs/chuang14/Haoran/vllm_arm.sif" \
@@ -13,7 +9,7 @@ apptainer exec --cleanenv --nv \
     --host 0.0.0.0 --port ${PORT} \
     --max-model-len 1800 \
     --max-num-seqs 1024 \
-    --enforce-eager \
-    --gpu-memory-utilization 0.85 \
+    --gpu-memory-utilization 0.80 \
     --disable-log-requests \
+    --uvicorn-log-level warning \
     --dtype bfloat16 "

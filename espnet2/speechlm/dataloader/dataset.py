@@ -210,7 +210,7 @@ class CombinedDataset(Dataset):
                     raise RuntimeError(f"Failed to load dataset: {e}") from e
         else:
             # Use ProcessPoolExecutor for parallel loading
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            with ProcessPoolExecutor(max_workers=max_workers * 3) as executor:
                 # Submit all loading tasks
                 futures = [
                     executor.submit(_load_dataset_worker, args)
