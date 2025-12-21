@@ -11,6 +11,11 @@ import numpy as np
 import pyarrow as pa
 
 try:
+    import kaldiio
+except ImportError:
+    kaldiio = None
+
+try:
     from arkive import audio_read
 except ImportError:
     raise ImportError(
@@ -212,3 +217,98 @@ class LhotseAudioReader:
         """Return iterator over (id, item) pairs."""
         for item in self.manifest:
             yield item.id, item
+
+
+class KaldiAudioReader:
+    """Dict-like lazy audio reader using Kaldi ark files via kaldiio.
+
+    Reads audio data from Kaldi ark files using an index file. The index file
+    should contain one entry per line in the format: "example_id ark_path:offset"
+
+    Returns:
+        Tuple of (audio_array, sample_rate) where audio_array has shape
+        [num_samples,] or [num_samples, num_channels].
+
+    Args:
+        index_path: Path to the index file containing "example_id ark:offset"
+            per line.
+        valid_ids: List of valid IDs to keep (optional, keeps all if None).
+    """
+
+    def __init__(
+        self,
+        index_path: str,
+        valid_ids: list = None,
+    ):
+        if kaldiio is None:
+            raise ImportError(
+                "kaldiio is not installed. "
+                "Please install it with: pip install kaldiio"
+            )
+
+        self.index = {}
+
+        valid_ids_set = set(valid_ids) if valid_ids is not None else None
+
+        with open(index_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                parts = line.split(maxsplit=1)
+                if len(parts) != 2:
+                    raise ValueError(
+                        f"Invalid index line format: '{line}'. "
+                        "Expected 'example_id ark_path:offset'"
+                    )
+
+                example_id, ark_index = parts
+
+                # Filter by valid_ids if provided
+                if valid_ids_set is not None and example_id not in valid_ids_set:
+                    continue
+
+                self.index[example_id] = ark_index
+
+    def __getitem__(self, key: str) -> Tuple[np.ndarray, int]:
+        """Get audio by ID. Returns (audio_array, sample_rate).
+
+        Returns:
+            Tuple of (audio_array, sample_rate) where audio_array has shape
+            [num_channels, num_samples]. For single-channel audio, shape will
+            be [1, num_samples].
+        """
+        if key not in self.index:
+            raise KeyError(f"Key '{key}' not found in index")
+
+        ark_index = self.index[key]
+        sample_rate, audio = kaldiio.load_mat(ark_index)
+
+        # Ensure consistent shape [num_channels, num_samples]
+        if audio.ndim == 1:
+            audio = audio[np.newaxis, :]  # Shape: [1, num_samples]
+
+        return audio, sample_rate
+
+    def __contains__(self, key: str) -> bool:
+        """Check if ID exists in index."""
+        return key in self.index
+
+    def __len__(self) -> int:
+        """Return number of items in index."""
+        return len(self.index)
+
+    def keys(self) -> Iterator[str]:
+        """Return iterator over IDs."""
+        return iter(self.index.keys())
+
+    def values(self) -> Iterator[Tuple[np.ndarray, int]]:
+        """Return iterator over (audio_array, sample_rate) tuples."""
+        for key in self.index:
+            yield self[key]
+
+    def items(self) -> Iterator[Tuple[str, Tuple[np.ndarray, int]]]:
+        """Return iterator over (id, (audio_array, sample_rate)) pairs."""
+        for key in self.index:
+            yield key, self[key]
