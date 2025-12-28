@@ -85,8 +85,7 @@ class SingleDataset(Dataset):
         # Use encode/decode to create NEW string objects in fresh contiguous memory.
         # This allows original strings to be fully freed, avoiding fragmentation.
         self.samples = [
-            s.encode("utf-8").decode("utf-8")
-            for s in all_samples[rank::world_size]
+            s.encode("utf-8").decode("utf-8") for s in all_samples[rank::world_size]
         ]
 
         del data, all_samples
@@ -213,8 +212,7 @@ class CombinedDataset(Dataset):
             with ProcessPoolExecutor(max_workers=max_workers * 3) as executor:
                 # Submit all loading tasks
                 futures = [
-                    executor.submit(_load_dataset_worker, args)
-                    for args in worker_args
+                    executor.submit(_load_dataset_worker, args) for args in worker_args
                 ]
 
                 # Collect results as they complete

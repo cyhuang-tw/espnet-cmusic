@@ -61,7 +61,8 @@ def build_parallel_hf_class(model_hf_tag):
                 pretrained_model_name_or_path: HF model path or identifier
                 multimodal_io: Dict of IO handlers for different modalities
                 vocab_intervals: Token range mappings for each modality
-                max_loss_interval: Maximum interval size for efficient loss computation
+                max_loss_interval: Max interval size for efficient loss computation
+                compile_transformer_body: Whether to torch.compile the model
                 **kwargs: Additional HF model loading arguments
 
             Returns:
@@ -73,9 +74,6 @@ def build_parallel_hf_class(model_hf_tag):
             )
 
             # (2) Rebuild embedding tables for multimodal vocabulary
-            # Strategy: Create new embeddings with unified vocabulary size,
-            # preserve text embeddings from pretrained model, initialize
-            # others randomly. Token 0 reserved for padding (zero embedding).
             with torch.no_grad():
                 # Calculate total vocabulary size across all modalities
                 vocab_size = max(
@@ -89,8 +87,9 @@ def build_parallel_hf_class(model_hf_tag):
                 embed_dim = model.config.hidden_size
                 new_embed_tokens = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
                 new_lm_head = nn.Linear(embed_dim, vocab_size, bias=False)
-                new_embed_tokens.weight[0] = 0.0
-                new_lm_head.weight[0] = 0.0
+
+                nn.init.normal_(new_embed_tokens.weight, mean=0.0, std=0.02)
+                nn.init.normal_(new_lm_head.weight, mean=0.0, std=0.02)
 
                 # Preserve pretrained text embeddings if text modality exists
                 if "text" in vocab_intervals:
@@ -133,6 +132,7 @@ def build_parallel_hf_class(model_hf_tag):
                 raise ValueError("Cannot proceed with all IOs being continuous")
             model.num_stream = max(possible_num_stream)
             model.stream_emb = nn.Embedding(model.num_stream, embed_dim)
+            nn.init.zeros_(model.stream_emb.weight)
 
             # (4) Setup multimodal IO handlers and adaptors
             # Discrete IOs use vocabulary, continuous IOs need linear adaptors
@@ -171,7 +171,7 @@ def build_parallel_hf_class(model_hf_tag):
             # (6) Optionally compile the transformer body for faster execution
             if compile_transformer_body:
                 model.model = torch.compile(model.model)
-
+            
             return model
 
         def forward(self, **kwargs):
@@ -258,7 +258,13 @@ def build_parallel_hf_class(model_hf_tag):
                     input_ids[bidx, start : start + length] = code[:length]
 
             # (2) Convert tokens to embeddings and sum across streams
-            input_embeds = self.model.embed_tokens(input_ids).sum(dim=2)
+            # NOTE(Jinchuan): Padding tokens in stream > 0 are zeroed out.
+            # Cannot do the same for stream 0 in Qwen3 for numerical stability.
+            input_embeds = self.model.embed_tokens(input_ids)
+            input_embeds[..., 1:, :] = torch.where(
+                (input_ids[..., 1:] == 0).unsqueeze(-1), 0.0, input_embeds[..., 1:, :]
+            )
+            input_embeds = input_embeds.sum(dim=2)
 
             # (3) Process continuous modalities: encode and project features
             for io_name in self.multimodal_io_dict:
@@ -280,7 +286,8 @@ def build_parallel_hf_class(model_hf_tag):
                 )
                 for feat, (bidx, start, length) in zip(io_feats, io_indices):
                     feat = self.adaptor[io_name](feat)
-                    input_embeds[bidx, start : start + length] = feat[:length]
+                    # NOTE(Jinchuan): Force the length to match
+                    input_embeds[bidx, start : start + length] = feat
 
             return input_embeds
 

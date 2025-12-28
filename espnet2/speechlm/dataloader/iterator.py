@@ -83,6 +83,10 @@ class DataIteratorFactory:
     ):
         self.collate_fn = collate_fn
         self.num_workers = num_workers
+        self.loader_state = loader_state
+        self.save_loader_state = save_loader_state
+        self.rank = rank
+        self.world_size = world_size
         self.shuffle = shuffle
         self.sequential_load = sequential_load
         self.seed = seed
@@ -278,6 +282,19 @@ class DataIteratorFactory:
             pin_memory=True,
             persistent_workers=True if self.num_workers > 0 else False,
         )
+
+        # Save batch_subset state if enabled
+        if self.save_loader_state and self.loader_state is not None:
+            loader_state_dir = Path(self.loader_state).parent
+            loader_state_dir.mkdir(parents=True, exist_ok=True)
+            filename = (
+                f"batch_subset_rank{self.rank}_world{self.world_size}"
+                f"_step{global_step}_len{length}.json"
+            )
+            state_file = loader_state_dir / filename
+            with open(state_file, "w") as f:
+                json.dump(batch_subset, f)
+            logging.info(f"Saved batch_subset to {state_file}")
 
         return dataloader
 

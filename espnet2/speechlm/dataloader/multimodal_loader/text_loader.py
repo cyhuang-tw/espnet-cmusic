@@ -60,16 +60,13 @@ class ArkiveTextReader:
                 """
             )
         else:
-            result = conn.execute(
-                f"SELECT * FROM read_parquet('{parquet_path}')"
-            )
+            result = conn.execute(f"SELECT * FROM read_parquet('{parquet_path}')")
 
         self.data = result.pl()
 
         # Build index without calling to_list() to avoid extra memory copy
         self.index = {
-            utt_id: idx
-            for idx, utt_id in enumerate(self.data["utt_id"].to_physical())
+            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_physical())
         }
 
         # Clean up connection

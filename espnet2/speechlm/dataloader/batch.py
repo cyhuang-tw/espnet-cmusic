@@ -66,8 +66,9 @@ def batchfy_bucket(
 
 
 _NUM_WORKERS = 8  # Fixed for reproducibility
-_FINISH_RATIO = 0.99  # Batch is "complete" when >= 99% full
-
+_FINISH_RATIO = 0.995  # Batch is "complete" when >= 99% full
+_N_STRATA = 64  # Number of length strata for diverse packing
+_SEED = 42 # Random seed for shuffling in diverse packing
 
 def _bfd_worker(items: List[tuple], batch_token: int) -> List[List[tuple]]:
     """Worker: sort (length, key) items and run Best Fit Decreasing."""
@@ -90,10 +91,80 @@ def _bfd_worker(items: List[tuple], batch_token: int) -> List[List[tuple]]:
     return batches
 
 
+def _diverse_bfd_worker(
+    items: List[tuple], batch_token: int
+) -> List[List[tuple]]:
+    """Stratified Best Fit: diversity + efficiency via interleaved packing.
+
+    Items are divided into length strata, shuffled within each stratum,
+    and interleaved (long, short, long, short...) before Best Fit packing.
+    This ensures each batch contains items from diverse length ranges while
+    maintaining high packing efficiency.
+    """
+    import random
+
+    if not items:
+        return []
+
+    rng = random.Random(_SEED)
+    n = len(items)
+    n_strata = min(_N_STRATA, n)
+
+    # Sort and divide into length strata
+    sorted_items = sorted(items, key=lambda x: x[0])
+    strata = [[] for _ in range(n_strata)]
+    for i, item in enumerate(sorted_items):
+        strata[i * n_strata // n].append(item)
+
+    # Shuffle within each stratum for epoch-to-epoch variety
+    for s in strata:
+        rng.shuffle(s)
+
+    # Interleave: longest stratum first, alternate long/short
+    # Order: [longest, shortest, 2nd longest, 2nd shortest, ...]
+    reordered = []
+    left, right = 0, n_strata - 1
+    while left <= right:
+        reordered.append(strata[right])  # long first for efficiency
+        if left != right:
+            reordered.append(strata[left])
+        left += 1
+        right -= 1
+
+    # Round-robin across reordered strata
+    interleaved = []
+    max_len = max(len(s) for s in reordered)
+    for i in range(max_len):
+        for s in reordered:
+            if i < len(s):
+                interleaved.append(s[i])
+
+    # Best Fit packing
+    min_remaining = int((1.0 - _FINISH_RATIO) * batch_token)
+    batches, active = [], SortedList()
+
+    for length, key in interleaved:
+        idx = active.bisect_left((length, -1))
+        if idx < len(active):
+            rem, bid = active.pop(idx)
+            batches[bid].append((length, key))
+            if rem - length > min_remaining:
+                active.add((rem - length, bid))
+        else:
+            if batch_token - length > min_remaining:
+                active.add((batch_token - length, len(batches)))
+            batches.append([(length, key)])
+
+    return batches
+
+
 def batchfy_pack(
     keys: List[T], key_to_length: Dict[T, int], batch_token: int
 ) -> List[List[T]]:
-    """Create batches using Best Fit Decreasing (parallel with 8 workers).
+    """Create batches using diverse Best Fit (parallel with 8 workers).
+
+    Uses stratified interleaving to ensure length diversity within batches
+    while maintaining high packing efficiency.
 
     Args:
         keys: List of sample keys to batch.
@@ -103,24 +174,21 @@ def batchfy_pack(
     Returns:
         List of batches, where each batch is a list of keys.
     """
-
-    # NOTE(Jinchuan): we observe some blocky loss fluctuation during training,
-    # why may suggest the batchfy_pack would potentially have some issue. We
-    # should revisit this issue a bit later.
-
     # Convert to (length, key) tuples - avoids copying dict to workers
     items = [(key_to_length[k], k) for k in keys]
 
     # Skip multiprocessing for small inputs
     if len(keys) < _NUM_WORKERS:
-        batches = _bfd_worker(items, batch_token)
+        batches = _diverse_bfd_worker(items, batch_token)
         return [[key for _, key in batch] for batch in batches]
 
     # Split items → parallel (sort + pack) → merge
     chunks = [items[i::_NUM_WORKERS] for i in range(_NUM_WORKERS)]
 
     with mp.Pool(_NUM_WORKERS) as pool:
-        results = pool.starmap(_bfd_worker, [(c, batch_token) for c in chunks])
+        results = pool.starmap(
+            _diverse_bfd_worker, [(c, batch_token) for c in chunks]
+        )
 
     # Merge: keep complete batches, re-pack incomplete ones
     min_filled = int(_FINISH_RATIO * batch_token)
@@ -132,7 +200,7 @@ def batchfy_pack(
 
     if redo:
         redo_items = [item for b in redo for item in b]
-        complete.extend(_bfd_worker(redo_items, batch_token))
+        complete.extend(_diverse_bfd_worker(redo_items, batch_token))
 
     # Extract keys only (discard lengths)
     return [[key for _, key in batch] for batch in complete]
@@ -228,5 +296,7 @@ def synchronize_batches(batches: List[List[T]]) -> List[List[T]]:
         batches = batches + batches[-(tgt_n_batches - n_batches) :]
         logger.info("Synchronize sharded dataset across all process")
         logger.info(f"#Batches: {n_batches} -> {tgt_n_batches}")
+    else:
+        logger.info(f"No need to synchronize sharded dataset. #Batches: {n_batches}")
 
     return batches

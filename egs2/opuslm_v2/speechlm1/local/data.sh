@@ -159,23 +159,24 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
     log "Stage 6: Prepare multiple audio caption dataset"
 
     names=""
-    # names+="clotho_test "
-    # names+="clotho_aqa "
-    # names+="clotho_train "
-    # names+="mtg-jamendo-dataset "
-    # names+="yt8m "
-    # names+="laion_captioned_ai_music_snippets "
-    # names+="laion_in_the_wild_sound_events "
-    # names+="emilia_en"
-    # names+="audioset "
-    # names+="audiocaps "
-    # names+="yodas_auto "
-    # names+="fma "
-    # names+="yodas_manual "
-    # names+="wavcaps "
-    # names+="mmau_test_speech "
-    # names+="mmau_test_sound "
-    # names+="mmau_test_music "
+    names+="clotho_test "
+    names+="clotho_aqa "
+    names+="clotho_train "
+    names+="mtg-jamendo-dataset "
+    names+="yt8m "
+    names+="laion_captioned_ai_music_snippets "
+    names+="laion_in_the_wild_sound_events "
+    names+="emilia_en"
+    names+="audioset "
+    names+="audiocaps "
+    names+="fma "
+    names+="mmau_test_speech "
+    names+="mmau_test_sound "
+    names+="mmau_test_music "
+    names+="clotho_train_development "
+    names+="youtube_8m_arkive "
+    names+="laion_disco_12m_part1 "
+    names+="laion_disco_12m_part2 "
 
     for name in ${names}; do
 
@@ -195,7 +196,32 @@ if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
             --triplets audio1,${audio_dir}/metadata.parquet,arkive_audio \
                     text1,${text_dir}/dump/metadata.parquet,arkive_text \
             --output_json ${json_dir}/caption.json
+    done
 
+    # Audio data packed by Kaldiio
+    names=""
+    names+="yodas_auto "
+    names+="yodas_manual "
+    names+="wavcaps "
+
+    for name in ${names}; do
+
+        audio_dir=${rootdir}/audio/${name}
+
+        Build audio-to-rich-caption dataset json
+        text_dir=${rootdir}/rich_caption/${name}; mkdir -p ${text_dir}
+        python3 local/dump_text.py \
+            --input_dir ${text_dir} \
+            --output_dir ${text_dir}/dump \
+            --mode qwen_caption \
+            --file_regex '^captions_rank.+\.jsonl$' \
+            --num_workers 32
+
+        json_dir=${rootdir}/data_jsons/${name}; mkdir -p ${json_dir}
+        python3 ../../../espnet2/speechlm/bin/prepare_dataset_json.py \
+            --triplets audio1,${audio_dir}/wav.scp,kaldi_audio \
+                    text1,${text_dir}/dump/metadata.parquet,arkive_text \
+            --output_json ${json_dir}/caption.json
     done
 fi
 log "Successfully finished. [elapsed=${SECONDS}s]"

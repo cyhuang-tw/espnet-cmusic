@@ -75,16 +75,13 @@ class ArkiveAudioReader:
                 """
             )
         else:
-            result = conn.execute(
-                f"SELECT * FROM read_parquet('{parquet_path}')"
-            )
+            result = conn.execute(f"SELECT * FROM read_parquet('{parquet_path}')")
 
         self.data = result.pl()
 
         # Build index without calling to_list() to avoid extra memory copy
         self.index = {
-            utt_id: idx
-            for idx, utt_id in enumerate(self.data["utt_id"].to_physical())
+            utt_id: idx for idx, utt_id in enumerate(self.data["utt_id"].to_physical())
         }
 
         # Clean up connection
@@ -95,12 +92,15 @@ class ArkiveAudioReader:
         idx = self.index[key]
         row = self.data.row(idx, named=True)
 
+        start_time = row.get("start_time", None)
+        end_time = row.get("end_time", None)
+
         data = audio_read(
             row["path"],
             start_offset=row["start_byte_offset"],
             file_size=row["file_size_bytes"],
-            start_time=row["start_time"],
-            end_time=row["end_time"],
+            start_time=start_time,
+            end_time=end_time,
         )
 
         return data.array.T, data.sample_rate

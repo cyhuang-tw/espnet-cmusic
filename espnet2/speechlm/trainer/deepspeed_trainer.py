@@ -126,14 +126,20 @@ class DeepSpeedTrainer:
                     reverse=True,
                 )[0]
 
-        if checkpoint_path:
+        # Load from Deepspeed checkpoint for both weights and optimizer states
+        if checkpoint_path and checkpoint_path.is_dir():
             _, client_state = self.model_engine.load_checkpoint(str(checkpoint_path))
-            # Restore global_step from client_state if available
             if client_state and "global_step" in client_state:
                 self.global_step = client_state["global_step"]
             logger.info(
                 f"Loaded checkpoint: {checkpoint_path} | step={self.global_step}"
             )
+        # Load from Pytorch checkpoint (ONLY weights, no optimizer states).
+        # TODO(Jinchuan): support partial loading of some specific modules
+        elif checkpoint_path and checkpoint_path.is_file():
+            checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")['module']
+            self.model_engine.module.load_state_dict(checkpoint_dict)
+            logger.info(f"Loaded checkpoint weights from: {checkpoint_path}")
         else:
             logger.info("No checkpoint found, starting from step 0")
 
@@ -209,6 +215,12 @@ class DeepSpeedTrainer:
             stats["time/iter"] = time.time() - iter_start
 
             wandb.log(stats, step=self.global_step)
+
+            if (
+                torch.distributed.get_rank() == 0
+                and self.global_step % self.log_interval == 0
+            ):
+                logger.info(f"step {self.global_step}, stats: {stats}")
 
             self.global_step += 1
 

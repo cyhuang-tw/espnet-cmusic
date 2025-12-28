@@ -5,11 +5,12 @@
 
 import math
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import joblib
 import numpy as np
 import torch
+import torchaudio
 
 from espnet2.speechlm.model.speechlm.multimodal_io.abs_io import AbsIO
 
@@ -677,9 +678,17 @@ class DiscreteAudioIO(AbsIO):
                 - loss_mask: Stream weights broadcasted to [length, num_stream]
         """
         wav, sr = data
+
+        assert wav.ndim == 2, "Audio array must be 2D: [num_channels, num_samples]"
+        wav = wav[:1] # Use only first channel for tokenization
+
+        # Resample if sample rate doesn't match
         if sr != self.sample_rate:
-            raise ValueError("Sample rate is not compatible for discrete audio")
-        length = self.find_length(data)
+            wav = torchaudio.functional.resample(
+                torch.from_numpy(wav), sr, self.sample_rate
+            ).numpy()
+
+        length = self.find_length((wav, self.sample_rate))
 
         ones = np.ones((length, self.num_stream())).astype(np.int32)
         paddings = ones * 0  # Placeholder tokens, actual encoding on GPU
@@ -849,39 +858,46 @@ class ContinuousAudioIO(AbsIO):
         """Initialize the audio encoder model."""
         if self.encoder_choice == "huggingface":
             if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
-                from transformers import (
-                    Qwen2_5OmniForConditionalGeneration,
-                    Qwen2_5OmniProcessor,
-                )
+                from transformers import Qwen2_5OmniForConditionalGeneration
 
-                # Load full Qwen multimodal model
-                full_model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-                    self.encoder_hf_model_tag,
-                    attn_implementation=self.attn_implementation,
-                    torch_dtype=self.dtype,
-                )
+                model_class = Qwen2_5OmniForConditionalGeneration
 
-                # Remove unnecessary components, keep only audio tower
-                del full_model.thinker.model  # Remove language model
-                del full_model.thinker.visual  # Remove vision components
-                del full_model.thinker.lm_head  # Remove output head
-                self.model = full_model.thinker.to(self.device)
+            elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+                from transformers import Qwen3OmniMoeForConditionalGeneration
 
-                # Load processor for audio preprocessing
-                self.processor = Qwen2_5OmniProcessor.from_pretrained(
-                    self.encoder_hf_model_tag
-                ).feature_extractor
-
-                # Set model attributes
-                self.d_model = self.model.audio_tower.config.output_dim
-                self.sample_rate = self.processor.sampling_rate
-                self.hop_length = self.processor.hop_length
-                self.n_samples = self.processor.n_samples
+                model_class = Qwen3OmniMoeForConditionalGeneration
 
             else:
                 raise NotImplementedError(
                     f"Model {self.encoder_hf_model_tag} not implemented"
                 )
+
+            # Load full Qwen multimodal model
+            full_model = model_class.from_pretrained(
+                self.encoder_hf_model_tag,
+                attn_implementation=self.attn_implementation,
+                torch_dtype=self.dtype,
+            )
+
+            # Remove unnecessary components, keep only audio tower
+            del full_model.thinker.model  # Remove language model
+            del full_model.thinker.visual  # Remove vision components
+            del full_model.thinker.lm_head  # Remove output head
+            self.model = full_model.thinker.to(self.device)
+
+            # Load processor for audio preprocessing
+            from transformers import AutoProcessor
+
+            self.processor = AutoProcessor.from_pretrained(
+                self.encoder_hf_model_tag
+            ).feature_extractor
+
+            # Set model attributes
+            self.d_model = self.model.audio_tower.config.output_dim
+            self.sample_rate = self.processor.sampling_rate
+            self.hop_length = self.processor.hop_length
+            self.n_samples = self.processor.n_samples
+
         else:
             raise NotImplementedError(
                 f"Encoder choice {self.encoder_choice} not implemented"
@@ -904,16 +920,29 @@ class ContinuousAudioIO(AbsIO):
                 - conti_feat: Tuple of (after_length, mel_features)
                 - loss_mask: Zero array [after_length, 1] (no discrete tokens)
         """
-        wav, fs = data
-        if fs != self.sample_rate:
-            raise ValueError("Imcompatible sampling rate")
 
-        if wav.shape[0] != 1:
-            raise ValueError("Only support single-channel audio")
+        wav, fs = data
+
+        if wav.ndim != 2:
+            raise ValueError("Input audio must be 2D array [num_channels, num_samples]")
+
+        if wav.shape[0] > wav.shape[1]:
+            raise ValueError(
+                "Audio shape seems incorrect, "
+                "please check num_channels and num_samples"
+            )
+
+        if wav.shape[1] > self.n_samples:
+            wav = wav[:, : self.n_samples]
+
+        # Convert multi-channel to single-channel by taking the first channel
         wav = wav[0]
 
-        if wav.shape[0] > self.n_samples:
-            raise ValueError("Input audio is too long to process")
+        # Resample if sample rate is wrong
+        if fs != self.sample_rate:
+            wav = torchaudio.functional.resample(
+                torch.from_numpy(wav), fs, self.sample_rate
+            ).numpy()
 
         # Extract mel-spectrogram features using processor
         output = self.processor(
@@ -927,13 +956,11 @@ class ContinuousAudioIO(AbsIO):
             sampling_rate=self.sample_rate,
         )
 
-        # Get valid features based on attention mask
-        before_length = output["attention_mask"].sum()
+        before_length = wav.shape[0] // self.hop_length
         feat = output["input_features"][0, :, :before_length].T
 
         # Calculate output length after model's two-layer downsampling
-        after_length = (before_length - 1) // 2 + 1  # First downsample
-        after_length = (after_length - 2) // 2 + 1  # Second downsample
+        after_length = self.find_length(None, before_length)
 
         paddings = np.zeros((after_length, 1)).astype(np.int32)
 
@@ -965,32 +992,58 @@ class ContinuousAudioIO(AbsIO):
             feature_attention_mask=mask,
         )
         # Calculate output lengths after model's downsampling
-        output_length = (length - 1) // 2 + 1
-        output_length = (output_length - 2) // 2 + 1
-        # Split concatenated features back into individual samples
+        output_length = self.find_length(None, length)
         audio_features = audio_features.split(output_length.tolist(), dim=0)
 
         return audio_features
 
-    def find_length(self, data: Tuple[np.ndarray, int]) -> int:
+    def find_length(
+        self,
+        data: Tuple[np.ndarray, int],
+        before_length: Union[int, torch.Tensor] = None,
+    ) -> Union[int, torch.Tensor]:
         """Calculate frame length after encoding.
 
-        We don't call self.processor as it's very slow to find the length
+        We don't call self.processor as it's very slow to find the length.
 
         Args:
             data: Tuple of (audio_array, sample_rate) where audio_array
-                  has shape [num_channels, num_samples]
+                  has shape [num_channels, num_samples]. Can be None if
+                  before_length is provided.
+            before_length: Pre-computed frame length before downsampling.
+                  If provided, data is ignored. Can be int or torch.Tensor
+                  for batch processing.
 
         Returns:
-            Frame length after encoding (number of frames)
+            Frame length after encoding. Returns int if before_length is int
+            or data is provided, returns torch.Tensor if before_length is
+            a tensor.
         """
-        wav, _ = data
-        frame_length = wav.shape[-1] // self.hop_length  # Initial frames
-        # Apply same downsampling as the encoder model
-        frame_length = (frame_length - 1) // 2 + 1  # First layer downsampling
-        frame_length = (frame_length - 2) // 2 + 1  # Second layer downsampling
+        if before_length is not None:
+            frame_length = before_length
+        else:
+            wav, _ = data
+            frame_length = wav.shape[-1] // self.hop_length
 
-        return int(frame_length)
+        if self.encoder_hf_model_tag == "Qwen/Qwen2.5-Omni-7B":
+            # Apply same downsampling as the encoder model
+            frame_length = (frame_length - 1) // 2 + 1  # First layer downsampling
+            frame_length = (frame_length - 2) // 2 + 1  # Second layer downsampling
+
+        elif self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct":
+            # Copied from modeling_qwen3_omni_moe.py L84-87
+            input_lengths_leave = frame_length % 100
+            feat_lengths = (input_lengths_leave - 1) // 2 + 1
+            frame_length = (
+                ((feat_lengths - 1) // 2 + 1 - 1) // 2 + 1 + (frame_length // 100) * 13
+            )
+
+        else:
+            raise NotImplementedError(
+                f"Model {self.encoder_hf_model_tag} not implemented"
+            )
+
+        return frame_length
 
     def copy_for_worker(self) -> "ContinuousAudioIO":
         """Create lightweight copy for multiprocessing workers.

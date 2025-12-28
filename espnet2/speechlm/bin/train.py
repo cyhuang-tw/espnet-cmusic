@@ -52,7 +52,7 @@ def get_parser() -> argparse.ArgumentParser:
         help="Directory to save checkpoints and logs",
     )
     train_group.add_argument(
-        "--resume_path",
+        "--resume-path",
         type=Path,
         default=None,
         help="Path to checkpoint to resume training from",
