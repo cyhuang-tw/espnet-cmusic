@@ -814,6 +814,28 @@ class DiscreteAudioIO(AbsIO):
 
         return worker_copy
 
+    def dummy_forward(self, ref_tensor: torch.Tensor) -> torch.Tensor:
+        """Perform a dummy forward pass to include parameters in the graph.
+
+        This ensures all encoder parameters participate in the backward pass
+        for proper gradient synchronization in distributed training.
+
+        Args:
+            ref_tensor: Reference tensor to get device and dtype from
+
+        Returns:
+            Output tensor from encode_batch (raw, not summed)
+        """
+        dummy_samples = self.frame_shift * 20
+        dummy_data = torch.zeros(
+            1, dummy_samples, 1, device=ref_tensor.device, dtype=ref_tensor.dtype
+        )
+        dummy_length = torch.tensor(
+            [dummy_samples], device=ref_tensor.device, dtype=torch.long
+        )
+        codes = self.encode_batch(dummy_data, dummy_length)
+        return codes
+
 
 class ContinuousAudioIO(AbsIO):
     """Continuous audio I/O for feature extraction.
@@ -874,7 +896,7 @@ class ContinuousAudioIO(AbsIO):
 
             # Load full Qwen multimodal model
             full_model = model_class.from_pretrained(
-                self.encoder_hf_model_tag,
+                "./" + self.encoder_hf_model_tag.replace("/", "-"),
                 attn_implementation=self.attn_implementation,
                 torch_dtype=self.dtype,
             )
@@ -1077,3 +1099,29 @@ class ContinuousAudioIO(AbsIO):
             Feature dimension of encoder output
         """
         return self.d_model
+
+    def dummy_forward(self, ref_tensor: torch.Tensor) -> torch.Tensor:
+        """Perform a dummy forward pass to include parameters in the graph.
+
+        This ensures all encoder parameters participate in the backward pass
+        for proper gradient synchronization in distributed training.
+
+        Args:
+            ref_tensor: Reference tensor to get device and dtype from
+
+        Returns:
+            Output tensor from encode_batch (raw, not summed)
+        """
+        # Get mel dimension from processor (feature_size for Whisper-style)
+        n_mels = self.processor.feature_size
+        dummy_frames = 4  # Minimal number of frames
+        # Input format: [batch, time, n_mels] (spectrogram features)
+        dummy_data = torch.zeros(
+            1, dummy_frames, n_mels,
+            device=ref_tensor.device, dtype=ref_tensor.dtype
+        )
+        dummy_length = torch.tensor(
+            [dummy_frames], device=ref_tensor.device, dtype=torch.long
+        )
+        feats = self.encode_batch(dummy_data, dummy_length)
+        return feats[0]

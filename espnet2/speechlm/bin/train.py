@@ -175,7 +175,7 @@ def main():
         "%(levelname)s: %(message)s"
     )
 
-    if rank == 0:
+    if args.local_rank == 0:
         log_level = args.log_level
     else:
         log_level = "CRITICAL"

@@ -254,10 +254,10 @@ valid_registered_specifier="\
   text_to_audio:mmau_test_music:1.0 \
 "
 
-train_config=conf/train_stage1_qwen3.yaml
+train_config=conf/train_stage1_qwen3_base.yaml
 
 stats_dir=exp/stats_qwen3
-exp_dir=exp/opuslm_v2_stage1_warmup
+exp_dir=exp/opuslm_v2_stage1_warmup_base
 mkdir -p ${exp_dir}
 
 inference_config=conf/inference.yaml

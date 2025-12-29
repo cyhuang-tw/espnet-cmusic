@@ -70,7 +70,7 @@ def build_parallel_hf_class(model_hf_tag):
             """
             # (1) Load the base model using parent's from_pretrained
             model = super(ParallelLLM, cls).from_pretrained(
-                pretrained_model_name_or_path, **kwargs
+                "./" + pretrained_model_name_or_path.replace("/", "-"), **kwargs
             )
 
             # (2) Rebuild embedding tables for multimodal vocabulary
@@ -288,6 +288,33 @@ def build_parallel_hf_class(model_hf_tag):
                     feat = self.adaptor[io_name](feat)
                     # NOTE(Jinchuan): Force the length to match
                     input_embeds[bidx, start : start + length] = feat
+            
+            # (4) Add dummy forward to ensure all multimodal_io are always included
+            # in the computation graph, even if not used in this batch.
+            # This prevents gradient mismatch errors in DeepSpeed ZeRO.
+            for io_name in self.multimodal_io_dict:
+                if io_name == "text":
+                    continue
+
+                # Skip if this modality was already used in this batch
+                if (
+                    f"{io_name}_feats" in kwargs
+                    and kwargs[f"{io_name}_feats"] is not None
+                    and len(kwargs[f"{io_name}_feats"]) > 0
+                ):
+                    continue
+
+                # Use dummy_forward from the IO class
+                io_module = self.multimodal_io_dict[io_name]
+                dummy_out = io_module.dummy_forward(ref_tensor=input_embeds)
+
+                # For continuous modalities, also run through adaptor
+                if not io_module.is_discrete and io_name in self.adaptor:
+                    dummy_out = self.adaptor[io_name](dummy_out)
+                dummy_out = dummy_out.to(input_embeds.dtype)
+
+                # Sum and add with zero weight to include in computation graph
+                input_embeds = input_embeds + 0.0 * dummy_out.sum()
 
             return input_embeds
 
