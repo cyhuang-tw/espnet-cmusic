@@ -297,7 +297,7 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
       --stats-dir ${stats_dir} \
       --output-dir ${exp_dir} \
       --save-loader-state \
-      --wandb-mode offline \
+      --wandb-mode online \
       > ${exp_dir}/logs/train_node${node_rank}_${timestamp}.log 2>&1 
 fi
 

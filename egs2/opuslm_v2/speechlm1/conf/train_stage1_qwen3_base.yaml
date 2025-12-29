@@ -23,6 +23,7 @@ model:
         attn_implementation: flash_attention_2
         dtype: bfloat16
         compile_transformer_body: false
+        freeze_text_embeddings: true
     activation_checkpointing: true
 
 

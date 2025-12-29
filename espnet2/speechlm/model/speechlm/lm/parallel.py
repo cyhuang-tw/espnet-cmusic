@@ -53,6 +53,7 @@ def build_parallel_hf_class(model_hf_tag):
             vocab_intervals,
             max_loss_interval: int = 13192,
             compile_transformer_body: bool = False,
+            freeze_text_embeddings: bool = False,
             **kwargs,
         ):
             """Load pretrained model and adapt it for multimodal parallel processing.
@@ -63,6 +64,8 @@ def build_parallel_hf_class(model_hf_tag):
                 vocab_intervals: Token range mappings for each modality
                 max_loss_interval: Max interval size for efficient loss computation
                 compile_transformer_body: Whether to torch.compile the model
+                freeze_text_embeddings: Whether to freeze pretrained text embeddings
+                    by zeroing their gradients during backward pass
                 **kwargs: Additional HF model loading arguments
 
             Returns:
@@ -171,7 +174,21 @@ def build_parallel_hf_class(model_hf_tag):
             # (6) Optionally compile the transformer body for faster execution
             if compile_transformer_body:
                 model.model = torch.compile(model.model)
-            
+
+            # (7) Freeze text embeddings if requested
+            # Register backward hooks to zero-out gradients for text token range
+            if freeze_text_embeddings and "text" in vocab_intervals:
+                text_start, text_end = vocab_intervals["text"][0]
+                model.freeze_text_start = text_start
+                model.freeze_text_end = text_end
+
+                def zero_text_embed_grad(grad):
+                    grad[model.freeze_text_start:model.freeze_text_end] = 0
+                    return grad
+
+                model.model.embed_tokens.weight.register_hook(zero_text_embed_grad)
+                model.lm_head.weight.register_hook(zero_text_embed_grad)
+
             return model
 
         def forward(self, **kwargs):
