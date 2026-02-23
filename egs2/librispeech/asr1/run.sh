@@ -5,25 +5,28 @@ set -e
 set -u
 set -o pipefail
 
-train_set="train_960"
-valid_set="dev"
-test_sets="test_clean test_other dev_clean dev_other"
+train_set="maestro_train_onsets"
+valid_set="maestro_dev_onsets"
+test_sets="maestro_test_onsets"
 
-asr_config=conf/train_asr_conformer.yaml
+asr_config=conf/train_asr_transformer.yaml
 lm_config=conf/tuning/train_lm_transformer2.yaml
 inference_config=conf/decode_asr.yaml
 
 ./asr.sh \
     --lang en \
-    --ngpu 4 \
-    --nbpe 5000 \
-    --max_wav_duration 30 \
-    --speed_perturb_factors "0.9 1.0 1.1" \
+    --ngpu 1 \
+    --token_type word \
+    --stage 11 \
+    --stop_stage 11 \
+    --max_wav_duration 9000 \
+    --feats_normalize utt_mvn \
+    --nj 1 \
     --asr_config "${asr_config}" \
     --lm_config "${lm_config}" \
     --inference_config "${inference_config}" \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
-    --lm_train_text "data/${train_set}/text data/local/other_text/text" \
+    --lm_train_text "data/${train_set}/text" \
     --bpe_train_text "data/${train_set}/text" "$@"

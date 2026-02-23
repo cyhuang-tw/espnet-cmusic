@@ -86,6 +86,7 @@ from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import (
     AbsPreprocessor,
     CommonPreprocessor,
+    MusicPreprocessor,
     CommonPreprocessor_multi,
 )
 from espnet2.train.trainer import Trainer
@@ -209,6 +210,7 @@ preprocessor_choices = ClassChoices(
     classes=dict(
         default=CommonPreprocessor,
         multi=CommonPreprocessor_multi,
+        music=MusicPreprocessor,
     ),
     type_check=AbsPreprocessor,
     default="default",

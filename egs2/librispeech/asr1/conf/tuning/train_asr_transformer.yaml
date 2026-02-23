@@ -10,6 +10,10 @@ best_model_criterion:
     - acc
     - max
 keep_nbest_models: 10
+use_amp: true
+preprocessor: music
+num_att_plot: 0
+num_workers: 4
 
 encoder: transformer
 encoder_conf:
@@ -34,8 +38,8 @@ decoder_conf:
     src_attention_dropout_rate: 0.0
 
 model_conf:
-    ctc_weight: 0.3
-    lsm_weight: 0.1
+    ctc_weight: 0.0
+    lsm_weight: 0.0
     length_normalized_loss: false
 
 optim: adam
@@ -45,18 +49,4 @@ scheduler: warmuplr
 scheduler_conf:
     warmup_steps: 25000
 
-specaug: specaug
-specaug_conf:
-    apply_time_warp: true
-    time_warp_window: 5
-    time_warp_mode: bicubic
-    apply_freq_mask: true
-    freq_mask_width_range:
-    - 0
-    - 30
-    num_freq_mask: 2
-    apply_time_mask: true
-    time_mask_width_range:
-    - 0
-    - 40
-    num_time_mask: 2
+specaug: null

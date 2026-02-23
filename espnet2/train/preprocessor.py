@@ -548,6 +548,201 @@ class CommonPreprocessor(AbsPreprocessor):
         data = self._text_process(data)
         return data
 
+class MusicPreprocessor(CommonPreprocessor):
+    def __init__(
+        self,
+        train: bool,
+        use_lang_prompt: bool = False,
+        use_nlp_prompt: bool = False,
+        token_type: Optional[str] = None,
+        token_list: Union[Path, str, Iterable[str]] = None,
+        bpemodel: Union[Path, str, Iterable[str]] = None,
+        text_cleaner: Collection[str] = None,
+        g2p_type: Optional[str] = None,
+        unk_symbol: str = "<unk>",
+        space_symbol: str = "<space>",
+        non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
+        delimiter: Optional[str] = None,
+        force_single_channel: bool = True,
+        rir_scp: Optional[str] = None,
+        rir_apply_prob: float = 1.0,
+        noise_scp: Optional[str] = None,
+        noise_apply_prob: float = 1.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        aux_task_names: Collection[str] = None,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech",
+        text_name: str = "text",
+        fs: int = 0,
+        nonsplit_symbol: Iterable[str] = None,
+        data_aug_effects: List = None,
+        data_aug_num: List[int] = [1, 1],
+        data_aug_prob: float = 0.0,
+        # for padding of chunk iterator, working when > 0
+        min_sample_size: int = -1,
+        audio_pad_value: Union[float, int] = 0.0,
+        # only use for whisper
+        whisper_language: Optional[str] = None,
+        whisper_task: Optional[str] = None,
+        max_context_sec: float = 30.0,
+        sr: float = 16000,
+    ):
+
+        super().__init__(
+            train=train,
+            token_type=token_type,
+            token_list=token_list,
+            bpemodel=bpemodel,
+            text_cleaner=text_cleaner,
+            g2p_type=g2p_type,
+            unk_symbol=unk_symbol,
+            space_symbol=space_symbol,
+            non_linguistic_symbols=non_linguistic_symbols,
+            delimiter=delimiter,
+            force_single_channel=force_single_channel,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+            text_name=text_name,
+            fs=fs,
+            data_aug_effects=data_aug_effects,
+            data_aug_num=data_aug_num,
+            data_aug_prob=data_aug_prob,
+        )
+        self.max_context_sec = max_context_sec
+        self.sr = sr
+
+    @typechecked
+    def _speech_process(
+        self, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Tuple[Dict[str, Union[str, np.ndarray]], float, float]:
+        if self.speech_name in data:
+            if self.train and (self.rirs is not None or self.noises is not None):
+                speech = data[self.speech_name]
+
+                # speech: (Nmic, Time)
+                if speech.ndim == 1:
+                    speech = speech[None, :]
+                else:
+                    speech = speech.T
+
+                # Calc power on non silence region
+                power = (speech[detect_non_silence(speech)] ** 2).mean()
+
+                # 1. Convolve RIR
+                if self.rirs is not None and self.rir_apply_prob >= np.random.random():
+                    speech, _ = self._convolve_rir(speech, power, self.rirs)
+
+                # 2. Add Noise
+                if (
+                    self.noises is not None
+                    and self.noise_apply_prob >= np.random.random()
+                ):
+                    speech, _ = self._add_noise(
+                        speech,
+                        power,
+                        self.noises,
+                        self.noise_db_low,
+                        self.noise_db_high,
+                    )
+
+                speech = speech.T
+                ma = np.max(np.abs(speech))
+                if ma > 1.0:
+                    speech /= ma
+                data[self.speech_name] = speech
+
+            if self.train and self.data_aug:
+                if self.data_aug_prob > 0 and self.data_aug_prob >= np.random.random():
+                    data[self.speech_name] = self.data_aug(
+                        data[self.speech_name], self.fs
+                    )
+
+            if self.force_single_channel:
+                speech = data[self.speech_name]
+                if speech.ndim == 2:
+                    # NOTE(jiatong): default average across channels
+                    speech = np.mean(speech, axis=1, keepdims=False)
+                data[self.speech_name] = speech
+
+            speech = data[self.speech_name]
+            len_sec = len(speech) / self.sr
+            if len_sec > 30:
+                start_time = random.uniform(0, len_sec - 30)
+            else:
+                start_time = 0
+            end_time = start_time + 30
+
+            speech = speech[int(start_time * self.sr) : int(end_time * self.sr)]
+            data[self.speech_name] = speech
+                
+        return data, start_time, end_time
+
+    def _text_process(
+        self, data: Dict[str, Union[str, np.ndarray]], start_time: float, end_time: float 
+    ) -> Dict[str, np.ndarray]:
+        #data[self.text_name] = np.array([0,1,2,3,4,5,6,7,8,9])
+        #return data
+        if self.text_name in data and self.tokenizer is not None:
+            text = data[self.text_name]
+            if isinstance(text, np.ndarray):
+                return data
+            text = self.text_cleaner(text)
+            tokens = self.tokenizer.text2tokens(text)
+
+            task_token = tokens[0]
+            start_index = None
+            end_index = None
+
+            tokens = tokens[1:]
+            for i, token in enumerate(tokens[::2]):
+                timestamp = float(token[1:])
+                if start_index is None and timestamp >= start_time:
+                    start_index = i
+                
+                if start_index is not None and timestamp < end_time:
+                    end_index = i
+
+                if timestamp > end_time:
+                    break
+
+            #print(start_time, end_time, tokens[start_index*2], tokens[end_index*2], flush=True)
+            tokens = tokens[start_index * 2 : (end_index+1) * 2]
+            #print(start_time, end_time)
+            #print(tokens)
+            new_tokens = []
+            pattern = r'^T\d+\.\d+$'
+            start_timestamp = float(tokens[0][1:])
+            for token in tokens:
+                if bool(re.match(pattern, token)):
+                    timestamp = float(token[1:])
+                    new_time = timestamp - start_timestamp
+                    s = f"{new_time:.2f}"
+                    new_tokens.append(f"T{s}")
+                else:
+                    new_tokens.append(token)
+            tokens = [task_token] + new_tokens
+            #print(tokens, flush=True)
+            text_ints = self.token_id_converter.tokens2ids(tokens)
+            #print(text_ints, flush=True)
+
+            data[self.text_name] = np.array(text_ints, dtype=np.int64)
+        return data
+
+    @typechecked
+    def __call__(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+
+        data, start_time, end_time = self._speech_process(data)
+        data = self._text_process(data, start_time, end_time)
+        return data
 
 class SLUPreprocessor(CommonPreprocessor):
     def __init__(
