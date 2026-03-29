@@ -62,12 +62,14 @@ def merge_supervisions(supervisions, max_timestamp_pause: float):
     merged = []
     for sup in sorted(supervisions, key=lambda x: x.start):
         if len(merged) == 0:
-            merged.append({
-                "start": sup.start,
-                "end": sup.start + sup.duration,
-                "text": sup.text,
-                "speaker": sup.speaker,
-            })
+            merged.append(
+                {
+                    "start": sup.start,
+                    "end": sup.start + sup.duration,
+                    "text": sup.text,
+                    "speaker": sup.speaker,
+                }
+            )
         else:
             last = merged[-1]
             gap = sup.start - last["end"]
@@ -75,12 +77,14 @@ def merge_supervisions(supervisions, max_timestamp_pause: float):
                 last["end"] = sup.start + sup.duration
                 last["text"] = last["text"] + " " + sup.text
             else:
-                merged.append({
-                    "start": sup.start,
-                    "end": sup.start + sup.duration,
-                    "text": sup.text,
-                    "speaker": sup.speaker,
-                })
+                merged.append(
+                    {
+                        "start": sup.start,
+                        "end": sup.start + sup.duration,
+                        "text": sup.text,
+                        "speaker": sup.speaker,
+                    }
+                )
     return merged
 
 
@@ -115,11 +119,13 @@ def get_transcript_units(cut, use_timestamps: bool, max_timestamp_pause: float):
                     end_ts = f"<|{round_nearest(seg['end'], 0.02):.2f}|>"
                     text = f"{start_ts} {text}{end_ts}"
 
-            units.append({
-                "speaker": speaker_id,
-                "text": text,
-                "start": seg["start"],
-            })
+            units.append(
+                {
+                    "speaker": speaker_id,
+                    "text": text,
+                    "start": seg["start"],
+                }
+            )
 
     return units
 
@@ -133,11 +139,13 @@ def merge_speaker_units(units, use_timestamps: bool):
     items = []
     joiner = "" if use_timestamps else " "
     for spk, utts in spk_map.items():
-        items.append({
-            "speaker": spk,
-            "text": joiner.join(u["text"] for u in utts),
-            "start": min(u["start"] for u in utts),
-        })
+        items.append(
+            {
+                "speaker": spk,
+                "text": joiner.join(u["text"] for u in utts),
+                "start": min(u["start"] for u in utts),
+            }
+        )
     return items
 
 
@@ -245,10 +253,7 @@ def get_audio_entry(cut, segments_dir: Optional[str] = None) -> Optional[str]:
         return None
 
     # Check if the cut is a segment of a longer recording
-    is_segment = (
-        cut.start > 0.01
-        or abs(cut.duration - cut.recording.duration) > 0.01
-    )
+    is_segment = cut.start > 0.01 or abs(cut.duration - cut.recording.duration) > 0.01
     if is_segment and segments_dir is not None:
         import soundfile as sf
 
@@ -278,8 +283,13 @@ def process_cutset(
         stats: dict with processing statistics
     """
     entries = []
-    stats = {"total": 0, "skipped_no_audio": 0, "skipped_no_text": 0,
-             "skipped_too_long": 0, "processed": 0}
+    stats = {
+        "total": 0,
+        "skipped_no_audio": 0,
+        "skipped_no_text": 0,
+        "skipped_too_long": 0,
+        "processed": 0,
+    }
 
     for cut in cutset:
         stats["total"] += 1
@@ -342,10 +352,9 @@ def write_kaldi_data(entries: list, output_dir: str):
     # Sort by utt_id for Kaldi compatibility
     entries.sort(key=lambda x: x[0])
 
-    with open(wav_scp_path, "w") as f_wav, \
-         open(text_path, "w") as f_text, \
-         open(utt2spk_path, "w") as f_utt2spk, \
-         open(spk2utt_path, "w") as f_spk2utt:
+    with open(wav_scp_path, "w") as f_wav, open(text_path, "w") as f_text, open(
+        utt2spk_path, "w"
+    ) as f_utt2spk, open(spk2utt_path, "w") as f_spk2utt:
         for utt_id, wav_path, text in entries:
             f_wav.write(f"{utt_id} {wav_path}\n")
             f_text.write(f"{utt_id} {text}\n")
@@ -424,7 +433,9 @@ def main():
 
     # Mutual exclusivity check (matches TS-ASR-Whisper)
     if args.use_spk_id_tokens and args.use_spk_rem_tokens:
-        parser.error("--use_spk_id_tokens and --use_spk_rem_tokens are mutually exclusive")
+        parser.error(
+            "--use_spk_id_tokens and --use_spk_rem_tokens are mutually exclusive"
+        )
 
     # Validate tokens against added_tokens_file if provided
     if args.added_tokens_file is not None:
@@ -437,7 +448,8 @@ def main():
             if "<sc>" not in registered_tokens:
                 logger.warning(
                     f"<sc> not found in {args.added_tokens_file} — "
-                    f"speaker change tokens will be split into subwords by the tokenizer"
+                    "speaker change tokens will be split "
+                    "into subwords by the tokenizer"
                 )
             if args.use_spk_count_tokens:
                 expected = {f"<|{n}spk|>" for n in range(1, 6)}
@@ -445,8 +457,9 @@ def main():
                 if missing:
                     logger.warning(
                         f"--use_spk_count_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: {sorted(missing)} — "
-                        f"they will be split into subwords by the tokenizer"
+                        f"are missing from {args.added_tokens_file}: "
+                        f"{sorted(missing)} — they will be split "
+                        "into subwords by the tokenizer"
                     )
             if args.use_spk_rem_tokens:
                 expected = {f"<|{n}spk_rem|>" for n in range(1, 6)}
@@ -454,8 +467,9 @@ def main():
                 if missing:
                     logger.warning(
                         f"--use_spk_rem_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: {sorted(missing)} — "
-                        f"they will be split into subwords by the tokenizer"
+                        f"are missing from {args.added_tokens_file}: "
+                        f"{sorted(missing)} — they will be split "
+                        "into subwords by the tokenizer"
                     )
             if args.use_spk_id_tokens:
                 expected = {f"<|spk{n}|>" for n in range(1, 6)}
@@ -463,8 +477,9 @@ def main():
                 if missing:
                     logger.warning(
                         f"--use_spk_id_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: {sorted(missing)} — "
-                        f"they will be split into subwords by the tokenizer"
+                        f"are missing from {args.added_tokens_file}: "
+                        f"{sorted(missing)} — they will be split "
+                        "into subwords by the tokenizer"
                     )
         except FileNotFoundError:
             logger.warning(
@@ -485,7 +500,12 @@ def main():
 
     # Load and concatenate cutsets
     all_entries = []
-    total_stats = {"total": 0, "skipped_no_audio": 0, "skipped_no_text": 0, "processed": 0}
+    total_stats = {
+        "total": 0,
+        "skipped_no_audio": 0,
+        "skipped_no_text": 0,
+        "processed": 0,
+    }
 
     for cutset_path in args.cutset_paths:
         logger.info(f"Loading cutset: {cutset_path}")
@@ -511,7 +531,9 @@ def main():
     utt_ids = [e[0] for e in all_entries]
     if len(utt_ids) != len(set(utt_ids)):
         dupes = len(utt_ids) - len(set(utt_ids))
-        logger.warning(f"Found {dupes} duplicate utt_ids — deduplicating by keeping first")
+        logger.warning(
+            f"Found {dupes} duplicate utt_ids — deduplicating by keeping first"
+        )
         seen = set()
         deduped = []
         for entry in all_entries:

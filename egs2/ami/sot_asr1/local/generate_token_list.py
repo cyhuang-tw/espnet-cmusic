@@ -12,19 +12,17 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate token list from tiktoken"
-    )
+    parser = argparse.ArgumentParser(description="Generate token list from tiktoken")
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--added_tokens_txt", type=str, default=None)
+    parser.add_argument("--added_tokens", type=str, nargs="*", default=None)
     parser.add_argument(
-        "--added_tokens", type=str, nargs="*", default=None
-    )
-    parser.add_argument(
-        "--num_languages", type=int, default=99,
+        "--num_languages",
+        type=int,
+        default=99,
         help="Number of language tokens. "
-             "99 for small/medium/large-v1/v2, "
-             "100 for large-v3/large-v3-turbo (adds <|yue|>).",
+        "99 for small/medium/large-v1/v2, "
+        "100 for large-v3/large-v3-turbo (adds <|yue|>).",
     )
     args = parser.parse_args()
 

@@ -17,23 +17,23 @@ import numpy as np
 import torch
 from typeguard import typechecked
 
+from espnet2.asr.espnet_model import ESPnetASRModel
 from espnet2.asr.sot_espnet_model import SOTWhisperModel
 from espnet2.tasks.asr import (
     ASRTask,
-    frontend_choices,
-    specaug_choices,
-    normalize_choices,
-    preencoder_choices,
-    encoder_choices,
-    postencoder_choices,
     decoder_choices,
+    encoder_choices,
+    frontend_choices,
+    normalize_choices,
+    postencoder_choices,
+    preencoder_choices,
+    specaug_choices,
 )
+from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import AbsPreprocessor, CommonPreprocessor
 from espnet2.train.sot_preprocessor import SOTWhisperPreprocessor
-from espnet2.train.abs_espnet_model import AbsESPnetModel
-from espnet2.asr.espnet_model import ESPnetASRModel
 from espnet2.utils.types import str2bool, str_or_none
 
 # Add SOTWhisperModel to model choices

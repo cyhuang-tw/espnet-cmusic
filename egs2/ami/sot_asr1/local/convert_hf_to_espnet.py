@@ -46,6 +46,7 @@ def get_whisper_base_vocab(espnet_config_path: str) -> int:
         return 51866
     return WHISPER_BASE_VOCAB_DEFAULT
 
+
 # ──────────────────────────────────────────────────────────────────────
 # Key renaming rules: (HF substring, ESPnet replacement)
 # Applied sequentially — all matching rules fire in order.
@@ -127,7 +128,9 @@ def load_hf_state_dict(path: str) -> dict:
 
 
 def convert_state_dict(
-    hf_state: dict, n_target_added: int, base_vocab: int = WHISPER_BASE_VOCAB_DEFAULT,
+    hf_state: dict,
+    n_target_added: int,
+    base_vocab: int = WHISPER_BASE_VOCAB_DEFAULT,
 ) -> OrderedDict:
     """Convert HF Whisper state dict to ESPnet native Whisper format.
 
@@ -204,13 +207,12 @@ def validate_keys(espnet_state: OrderedDict, config_path: str, token_list_path: 
     strict=False to verify shape compatibility.
     """
     import yaml
+
     from espnet2.tasks.sot_asr import SOTASRTask
 
     # Build args from config
     parser = SOTASRTask.get_parser()
-    args = parser.parse_args(
-        ["--config", config_path, "--token_list", token_list_path]
-    )
+    args = parser.parse_args(["--config", config_path, "--token_list", token_list_path])
     model = SOTASRTask.build_model(args)
 
     model_keys = set(model.state_dict().keys())
@@ -220,7 +222,9 @@ def validate_keys(espnet_state: OrderedDict, config_path: str, token_list_path: 
     unexpected = converted_keys - model_keys
 
     if missing:
-        logging.info(f"Keys in ESPnet model but not in converted checkpoint ({len(missing)}):")
+        logging.info(
+            f"Keys in ESPnet model but not in converted checkpoint ({len(missing)}):"
+        )
         for k in sorted(missing):
             logging.info(f"  MISSING: {k}")
     if unexpected:
@@ -235,7 +239,8 @@ def validate_keys(espnet_state: OrderedDict, config_path: str, token_list_path: 
     if result.missing_keys:
         logging.info(
             f"load_state_dict missing_keys ({len(result.missing_keys)}): "
-            f"{result.missing_keys[:10]}{'...' if len(result.missing_keys) > 10 else ''}"
+            f"{result.missing_keys[:10]}"
+            f"{'...' if len(result.missing_keys) > 10 else ''}"
         )
     if result.unexpected_keys:
         logging.warning(
@@ -299,7 +304,8 @@ def main():
         "--added_tokens",
         type=str,
         default=None,
-        help="Path to added_tokens.txt (overrides token_list for counting added tokens)",
+        help="Path to added_tokens.txt "
+        "(overrides token_list for counting added tokens)",
     )
     parser.add_argument(
         "--validate",

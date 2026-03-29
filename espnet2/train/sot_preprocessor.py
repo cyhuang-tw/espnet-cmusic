@@ -63,8 +63,8 @@ class SOTWhisperPreprocessor(AbsPreprocessor):
         self.encoding = tokenizer.encoding
 
         # Special token IDs from the tokenizer
-        self.eot_id = tokenizer.eot           # 50257
-        self.sot_id = tokenizer.sot           # 50258
+        self.eot_id = tokenizer.eot  # 50257
+        self.sot_id = tokenizer.sot  # 50258
         self.timestamp_begin = tokenizer.timestamp_begin  # 50364
 
         # Build language + task prefix (no <|notimestamps|> for SOT)
@@ -149,9 +149,7 @@ class SOTWhisperPreprocessor(AbsPreprocessor):
 
             # Regular text — encode with tiktoken
             if segment.strip():
-                encoded = self.encoding.encode(
-                    segment, allowed_special="all"
-                )
+                encoded = self.encoding.encode(segment, allowed_special="all")
                 token_ids.extend(encoded)
 
         return token_ids

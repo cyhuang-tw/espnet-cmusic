@@ -83,9 +83,7 @@ def main():
             rate = (i + 1) / elapsed
             eta = (len(utts) - i - 1) / rate
             logger.info(
-                f"[{i+1}/{len(utts)}] "
-                f"{rate:.1f} utt/s, "
-                f"ETA: {eta/3600:.1f}h"
+                f"[{i+1}/{len(utts)}] " f"{rate:.1f} utt/s, " f"ETA: {eta/3600:.1f}h"
             )
 
     f_text.close()

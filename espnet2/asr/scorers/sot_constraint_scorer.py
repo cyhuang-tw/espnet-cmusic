@@ -84,15 +84,10 @@ class SOTConstraintScorer(BatchScorerInterface):
         self._spk_id_set: Set[int] = (
             set(spk_id_token_ids) if spk_id_token_ids else set()
         )
-        self._task_set: Set[int] = (
-            set(task_token_ids) if task_token_ids else set()
-        )
+        self._task_set: Set[int] = set(task_token_ids) if task_token_ids else set()
         # All custom special tokens whose IDs sit above timestamp_begin
         self._all_special_above_ts: Set[int] = (
-            self._spk_count_set
-            | self._spk_rem_set
-            | self._spk_id_set
-            | self._task_set
+            self._spk_count_set | self._spk_rem_set | self._spk_id_set | self._task_set
         )
 
     def _force_timestamp(self, scores: torch.Tensor) -> None:
@@ -101,14 +96,12 @@ class SOTConstraintScorer(BatchScorerInterface):
         Suppress everything below timestamp_begin, restore EOS,
         and suppress custom special tokens above timestamp_begin (A8).
         """
-        scores[:self.timestamp_begin] = float("-inf")
+        scores[: self.timestamp_begin] = float("-inf")
         scores[self.eos] = 0.0
         for tok_id in self._all_special_above_ts:
             scores[tok_id] = float("-inf")
 
-    def _force_token_set(
-        self, scores: torch.Tensor, token_ids: List[int]
-    ) -> None:
+    def _force_token_set(self, scores: torch.Tensor, token_ids: List[int]) -> None:
         """Force only the given token set (+ EOS)."""
         scores[:] = float("-inf")
         for tok_id in token_ids:
@@ -183,12 +176,10 @@ class SOTConstraintScorer(BatchScorerInterface):
 
         # A3: Timestamp pairing scoped to current_block
         last_was_timestamp = (
-            len(current_block) >= 1
-            and current_block[-1] >= self.timestamp_begin
+            len(current_block) >= 1 and current_block[-1] >= self.timestamp_begin
         )
         penultimate_was_timestamp = (
-            len(current_block) < 2
-            or current_block[-2] >= self.timestamp_begin
+            len(current_block) < 2 or current_block[-2] >= self.timestamp_begin
         )
 
         if last_was_timestamp:
@@ -256,8 +247,6 @@ class SOTConstraintScorer(BatchScorerInterface):
         """
         batch_scores = []
         for i in range(ys.shape[0]):
-            score, _ = self.score(
-                ys[i], None, xs[i] if xs.dim() > 1 else xs
-            )
+            score, _ = self.score(ys[i], None, xs[i] if xs.dim() > 1 else xs)
             batch_scores.append(score)
         return torch.stack(batch_scores, dim=0), [None] * ys.shape[0]

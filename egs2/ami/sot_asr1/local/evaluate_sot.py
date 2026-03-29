@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def strip_whisper_special_tokens(text: str) -> str:
-    """Remove Whisper special tokens like <|startoftranscript|>, <|endoftext|>, timestamps."""
+    """Remove Whisper special tokens (timestamps, etc.)."""
     # Remove <|...|> tokens
     text = re.sub(r"<\|[^|]*\|>", "", text)
     # Collapse whitespace
@@ -115,9 +115,7 @@ def load_text_file(path: str) -> Dict[str, str]:
     return entries
 
 
-def split_sot_text(
-    text: str, speaker_change_token: str, text_norm=None
-) -> List[str]:
+def split_sot_text(text: str, speaker_change_token: str, text_norm=None) -> List[str]:
     """Split SOT text at speaker change tokens to get per-speaker texts.
 
     Also strips Whisper special tokens from each speaker's text.
@@ -206,9 +204,7 @@ def main():
     # Set up text normalizer
     text_norm = None
     if args.text_norm and args.text_norm != "none":
-        sys.path.insert(
-            0, "/work/nvme/bbjs/chuang14/mtasr/TS-ASR-Whisper/src"
-        )
+        sys.path.insert(0, "/work/nvme/bbjs/chuang14/mtasr/TS-ASR-Whisper/src")
         from txt_norm import get_text_norm
 
         text_norm = get_text_norm(args.text_norm)
@@ -229,17 +225,25 @@ def main():
     missing_hyp = set(ref_texts.keys()) - set(hyp_texts.keys())
     missing_ref = set(hyp_texts.keys()) - set(ref_texts.keys())
     if missing_hyp:
-        logger.warning(f"{len(missing_hyp)} reference utterances missing from hypothesis")
+        logger.warning(
+            f"{len(missing_hyp)} reference utterances missing from hypothesis"
+        )
     if missing_ref:
-        logger.warning(f"{len(missing_ref)} hypothesis utterances missing from reference")
+        logger.warning(
+            f"{len(missing_ref)} hypothesis utterances missing from reference"
+        )
 
     # Split SOT texts into per-speaker parts
     refs = {}
     hyps = {}
     num_ref_speakers = {}
     for utt_id in sorted(common_utts):
-        ref_speakers = split_sot_text(ref_texts[utt_id], args.speaker_change_token, text_norm)
-        hyp_speakers = split_sot_text(hyp_texts[utt_id], args.speaker_change_token, text_norm)
+        ref_speakers = split_sot_text(
+            ref_texts[utt_id], args.speaker_change_token, text_norm
+        )
+        hyp_speakers = split_sot_text(
+            hyp_texts[utt_id], args.speaker_change_token, text_norm
+        )
 
         # meeteval expects non-empty lists
         if not ref_speakers:
@@ -268,14 +272,18 @@ def main():
     )
 
     with open(os.path.join(args.output_dir, "cpwer.json"), "w") as f:
-        json.dump({
-            "cpwer": results["cpwer"],
-            "errors": results["errors"],
-            "length": results["length"],
-            "insertions": results["insertions"],
-            "deletions": results["deletions"],
-            "substitutions": results["substitutions"],
-        }, f, indent=2)
+        json.dump(
+            {
+                "cpwer": results["cpwer"],
+                "errors": results["errors"],
+                "length": results["length"],
+                "insertions": results["insertions"],
+                "deletions": results["deletions"],
+                "substitutions": results["substitutions"],
+            },
+            f,
+            indent=2,
+        )
 
     # Per-speaker-count breakdown
     spk_groups = defaultdict(list)
@@ -284,6 +292,7 @@ def main():
 
     cpwer_by_nspk = {}
     import meeteval
+
     for n, utt_ids in sorted(spk_groups.items()):
         group_refs = {uid: refs[uid] for uid in utt_ids}
         group_hyps = {uid: hyps[uid] for uid in utt_ids}

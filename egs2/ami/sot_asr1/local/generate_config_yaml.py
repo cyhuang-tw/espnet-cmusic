@@ -14,8 +14,9 @@ Usage:
 
 import argparse
 import logging
-import yaml
 from pathlib import Path
+
+import yaml
 
 from espnet2.tasks.sot_asr import SOTASRTask
 
@@ -25,15 +26,21 @@ def main():
         description="Generate ESPnet config.yaml for inference"
     )
     parser.add_argument(
-        "--config", type=str, required=True,
+        "--config",
+        type=str,
+        required=True,
         help="Path to training config YAML (e.g. conf/tuning/train_sot.yaml)",
     )
     parser.add_argument(
-        "--token_list", type=str, required=True,
+        "--token_list",
+        type=str,
+        required=True,
         help="Path to token_list.txt",
     )
     parser.add_argument(
-        "--output", type=str, required=True,
+        "--output",
+        type=str,
+        required=True,
         help="Output path for config.yaml",
     )
     args = parser.parse_args()

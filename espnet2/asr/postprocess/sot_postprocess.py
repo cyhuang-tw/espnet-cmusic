@@ -17,9 +17,7 @@ def count_ngrams(text: str, min_n: int = 2, max_n: int = 5) -> Dict[str, int]:
     for n in range(min_n, max_n + 1):
         for i in range(len(words) - n + 1):
             ngram_words = words[i : i + n]
-            if all(
-                word.lower() == ngram_words[0].lower() for word in ngram_words
-            ):
+            if all(word.lower() == ngram_words[0].lower() for word in ngram_words):
                 continue
             ngram = " ".join(ngram_words)
             counts[ngram] += 1
@@ -69,9 +67,7 @@ def truncate_at_repeating_ngram(
                 else:
                     break
             if consecutive_count >= unigram_min_repeat:
-                earliest_truncation_idx = min(
-                    earliest_truncation_idx, i + 1
-                )
+                earliest_truncation_idx = min(earliest_truncation_idx, i + 1)
                 break
 
     # Count all n-grams
@@ -86,9 +82,7 @@ def truncate_at_repeating_ngram(
         for i in range(len(words) - n + 1):
             ngram = " ".join(words[i : i + n])
             if all_ngram_counts[ngram] > repeat_threshold:
-                earliest_truncation_idx = min(
-                    earliest_truncation_idx, i + n
-                )
+                earliest_truncation_idx = min(earliest_truncation_idx, i + n)
 
     if earliest_truncation_idx < len(words):
         return " ".join(words[:earliest_truncation_idx])
@@ -130,15 +124,9 @@ def process_sot_output(
           - predicted_n_spk: Predicted speaker count (or None).
           - block_speaker_ids: Per-block speaker ID (1-indexed, or None).
     """
-    spk_count_set: Set[int] = (
-        set(spk_count_token_ids) if spk_count_token_ids else set()
-    )
-    spk_id_set: Set[int] = (
-        set(spk_id_token_ids) if spk_id_token_ids else set()
-    )
-    spk_rem_set: Set[int] = (
-        set(spk_rem_token_ids) if spk_rem_token_ids else set()
-    )
+    spk_count_set: Set[int] = set(spk_count_token_ids) if spk_count_token_ids else set()
+    spk_id_set: Set[int] = set(spk_id_token_ids) if spk_id_token_ids else set()
+    spk_rem_set: Set[int] = set(spk_rem_token_ids) if spk_rem_token_ids else set()
     task_set: Set[int] = set(task_token_ids) if task_token_ids else set()
     filter_set: Set[int] = spk_count_set | spk_rem_set | spk_id_set | task_set
 

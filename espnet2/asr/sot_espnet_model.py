@@ -97,9 +97,7 @@ class SOTWhisperModel(ESPnetASRModel):
 
         self.use_uppercase_loss = use_uppercase_loss
         if use_uppercase_loss:
-            self.upper_cased_tokens = self._create_lower_uppercase_mapping(
-                token_list
-            )
+            self.upper_cased_tokens = self._create_lower_uppercase_mapping(token_list)
             logging.info(
                 f"SOTWhisperModel: uppercase min-CE enabled, "
                 f"{len(self.upper_cased_tokens)} case pairs"
@@ -120,9 +118,7 @@ class SOTWhisperModel(ESPnetASRModel):
                 continue
             if token[0] == "\u0120" and len(token) > 1:
                 lower_cased_token = (
-                    token[0]
-                    + token[1].lower()
-                    + (token[2:] if len(token) > 2 else "")
+                    token[0] + token[1].lower() + (token[2:] if len(token) > 2 else "")
                 )
             else:
                 lower_cased_token = token[0].lower() + token[1:]
@@ -178,9 +174,7 @@ class SOTWhisperModel(ESPnetASRModel):
             )
             ys_pad_lens += 1
 
-        ys_in_pad, ys_out_pad = add_sos_eos(
-            ys_pad, self.sos, self.eos, self.ignore_id
-        )
+        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
         ys_in_lens = ys_pad_lens + 1
 
         # Forward decoder

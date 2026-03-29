@@ -4,15 +4,16 @@ Uses OpenAI Whisper encoder/decoder with tiktoken for decoding.
 Includes SOT constraint scoring and post-processing.
 """
 
+import argparse
 import logging
 import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-import argparse
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typeguard import typechecked
 
 from espnet2.asr.postprocess.sot_postprocess import process_sot_output
@@ -22,21 +23,99 @@ from espnet2.tasks.sot_asr import SOTASRTask
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
 from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool, str2triple_str, str_or_none
-import torch.nn.functional as F
 from espnet.nets.beam_search import BeamSearch, Hypothesis
 from espnet.nets.scorers.length_bonus import LengthBonus
 from espnet.utils.cli_utils import get_commandline_args
 
-
 # Default suppress_tokens from Whisper generation_config.json
 WHISPER_SUPPRESS_TOKENS = [
-    1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63,
-    90, 91, 92, 93, 359, 503, 522, 542, 873, 893, 902, 918, 922, 931, 1350,
-    1853, 1982, 2460, 2627, 3246, 3253, 3268, 3536, 3846, 3961, 4183, 4667,
-    6585, 6647, 7273, 9061, 9383, 10428, 10929, 11938, 12033, 12331, 12562,
-    13793, 14157, 14635, 15265, 15618, 16553, 16604, 18362, 18956, 20075,
-    21675, 22520, 26130, 26161, 26435, 28279, 29464, 31650, 32302, 32470,
-    36865, 42863, 47425, 49870, 50254, 50258, 50359, 50360, 50361, 50362,
+    1,
+    2,
+    7,
+    8,
+    9,
+    10,
+    14,
+    25,
+    26,
+    27,
+    28,
+    29,
+    31,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    90,
+    91,
+    92,
+    93,
+    359,
+    503,
+    522,
+    542,
+    873,
+    893,
+    902,
+    918,
+    922,
+    931,
+    1350,
+    1853,
+    1982,
+    2460,
+    2627,
+    3246,
+    3253,
+    3268,
+    3536,
+    3846,
+    3961,
+    4183,
+    4667,
+    6585,
+    6647,
+    7273,
+    9061,
+    9383,
+    10428,
+    10929,
+    11938,
+    12033,
+    12331,
+    12562,
+    13793,
+    14157,
+    14635,
+    15265,
+    15618,
+    16553,
+    16604,
+    18362,
+    18956,
+    20075,
+    21675,
+    22520,
+    26130,
+    26161,
+    26435,
+    28279,
+    29464,
+    31650,
+    32302,
+    32470,
+    36865,
+    42863,
+    47425,
+    49870,
+    50254,
+    50258,
+    50359,
+    50360,
+    50361,
+    50362,
     50363,
 ]
 
@@ -58,9 +137,7 @@ class SOTBeamSearch(BeamSearch):
         best_hyps = []
         part_ids = torch.arange(self.n_vocab, device=x.device)
         for hyp in running_hyps:
-            weighted_scores = torch.zeros(
-                self.n_vocab, dtype=x.dtype, device=x.device
-            )
+            weighted_scores = torch.zeros(self.n_vocab, dtype=x.dtype, device=x.device)
             if self.return_hs:
                 hs, scores, states = self.score_full(hyp, x, pre_x=pre_x)
             else:
@@ -105,10 +182,11 @@ class SOTBeamSearch(BeamSearch):
                     )
                 )
 
-            best_hyps = sorted(
-                best_hyps, key=lambda x: x.score, reverse=True
-            )[: min(len(best_hyps), self.beam_size)]
+            best_hyps = sorted(best_hyps, key=lambda x: x.score, reverse=True)[
+                : min(len(best_hyps), self.beam_size)
+            ]
         return best_hyps
+
 
 logger = logging.getLogger(__name__)
 
@@ -268,19 +346,16 @@ class SOTSpeech2Text:
                     added_tokens_file = getattr(
                         asr_train_args, "added_tokens_file", None
                     )
-                    preprocessor_conf = getattr(
-                        asr_train_args, "preprocessor_conf", {}
-                    )
-                    atf = (
-                        added_tokens_file
-                        or preprocessor_conf.get("added_tokens_txt", None)
+                    preprocessor_conf = getattr(asr_train_args, "preprocessor_conf", {})
+                    atf = added_tokens_file or preprocessor_conf.get(
+                        "added_tokens_txt", None
                     )
                     added_tokens = ["<sc>"]
                     if atf is not None:
                         try:
                             with open(atf) as f:
                                 added_tokens = [
-                                    l.strip() for l in f if l.strip()
+                                    line.strip() for line in f if line.strip()
                                 ]
                         except FileNotFoundError:
                             pass
@@ -320,11 +395,11 @@ class SOTSpeech2Text:
 
         # Build beam search with probability-based timestamp forcing
         beam_search = SOTBeamSearch(
-            timestamp_begin=timestamp_begin
-            if use_sot_constraint
-            else token_list.index("<|0.00|>")
-            if "<|0.00|>" in token_list
-            else 50365,
+            timestamp_begin=(
+                timestamp_begin
+                if use_sot_constraint
+                else token_list.index("<|0.00|>") if "<|0.00|>" in token_list else 50365
+            ),
             beam_size=beam_size,
             weights=weights,
             scorers=scorers,
@@ -389,9 +464,7 @@ class SOTSpeech2Text:
             speech = torch.tensor(speech)
 
         speech = speech.unsqueeze(0).to(getattr(torch, self.dtype))
-        lengths = speech.new_full(
-            [1], dtype=torch.long, fill_value=speech.size(1)
-        )
+        lengths = speech.new_full([1], dtype=torch.long, fill_value=speech.size(1))
 
         speech = speech.to(self.device)
         lengths = lengths.to(self.device)
@@ -424,15 +497,13 @@ class SOTSpeech2Text:
                 self.tiktoken_adapter is not None
                 and self.separator_token_id is not None
             ):
-                per_spk, raw_transcript, pred_n_spk, block_spk_ids = (
-                    process_sot_output(
-                        token_int=token_int,
-                        hf_tokenizer=self.tiktoken_adapter,
-                        separator_token_id=self.separator_token_id,
-                        spk_count_token_ids=self.spk_count_token_ids,
-                        spk_rem_token_ids=self.spk_rem_token_ids,
-                        spk_id_token_ids=self.spk_id_token_ids,
-                    )
+                per_spk, raw_transcript, pred_n_spk, block_spk_ids = process_sot_output(
+                    token_int=token_int,
+                    hf_tokenizer=self.tiktoken_adapter,
+                    separator_token_id=self.separator_token_id,
+                    spk_count_token_ids=self.spk_count_token_ids,
+                    spk_rem_token_ids=self.spk_rem_token_ids,
+                    spk_id_token_ids=self.spk_id_token_ids,
                 )
                 text = raw_transcript
             elif self.tiktoken_adapter is not None:
@@ -530,12 +601,8 @@ def inference(
         batch_size=batch_size,
         key_file=key_file,
         num_workers=num_workers,
-        preprocess_fn=SOTASRTask.build_preprocess_fn(
-            speech2text.asr_train_args, False
-        ),
-        collate_fn=SOTASRTask.build_collate_fn(
-            speech2text.asr_train_args, False
-        ),
+        preprocess_fn=SOTASRTask.build_preprocess_fn(speech2text.asr_train_args, False),
+        collate_fn=SOTASRTask.build_collate_fn(speech2text.asr_train_args, False),
         allow_variable_data_keys=allow_variable_data_keys,
         inference=True,
     )
@@ -557,9 +624,7 @@ def inference(
                 results = [(" ", ["<space>"], [2], hyp)] * nbest
 
             key = keys[0]
-            for n, (text, token, token_int, hyp) in zip(
-                range(1, nbest + 1), results
-            ):
+            for n, (text, token, token_int, hyp) in zip(range(1, nbest + 1), results):
                 ibest_writer = writer[f"{n}best_recog"]
                 ibest_writer["token"][key] = " ".join(token)
                 ibest_writer["token_int"][key] = " ".join(map(str, token_int))
@@ -595,9 +660,7 @@ def get_parser():
         action="append",
     )
     group.add_argument("--key_file", type=str_or_none, default=None)
-    group.add_argument(
-        "--allow_variable_data_keys", type=str2bool, default=False
-    )
+    group.add_argument("--allow_variable_data_keys", type=str2bool, default=False)
 
     group = parser.add_argument_group("Model")
     group.add_argument("--asr_train_config", type=str, required=True)
