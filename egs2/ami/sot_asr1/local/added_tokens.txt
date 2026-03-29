@@ -1,16 +1,1 @@
 <sc>
-<|1spk|>
-<|2spk|>
-<|3spk|>
-<|4spk|>
-<|5spk|>
-<|1spk_rem|>
-<|2spk_rem|>
-<|3spk_rem|>
-<|4spk_rem|>
-<|5spk_rem|>
-<|spk1|>
-<|spk2|>
-<|spk3|>
-<|spk4|>
-<|spk5|>

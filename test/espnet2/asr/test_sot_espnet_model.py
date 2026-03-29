@@ -14,7 +14,7 @@ from espnet2.asr.sot_espnet_model import SOTWhisperModel
 is_torch_1_7_plus = V(torch.__version__) >= V("1.7.0")
 is_python_3_8_plus = sys.version_info >= (3, 8)
 
-VOCAB_SIZE = 51881  # 51865 base + 16 added tokens
+VOCAB_SIZE = 51866  # 51865 base + 1 added token (<sc>)
 BASE_VOCAB = 51865
 
 
@@ -30,9 +30,8 @@ def _make_token_list():
     tokens[67] = "Hello"
     tokens[50257] = "<|endoftext|>"
     tokens[50258] = "<|startoftranscript|>"
-    # Added tokens
-    for i in range(BASE_VOCAB, VOCAB_SIZE):
-        tokens.append(f"<added_{i - BASE_VOCAB}>")
+    # Added token: <sc>
+    tokens.append("<sc>")
     return tokens
 
 

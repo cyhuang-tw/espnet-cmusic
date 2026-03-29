@@ -54,7 +54,7 @@ def test_preprocessor_speaker_change(preprocessor):
 @pytest.mark.timeout(30)
 def test_preprocessor_added_tokens_from_file(tmp_path):
     tokens_file = tmp_path / "tokens.txt"
-    tokens_file.write_text("<sc>\n<|1spk|>\n")
+    tokens_file.write_text("<sc>\n")
     prep = SOTWhisperPreprocessor(
         train=True,
         whisper_language="en",
@@ -62,7 +62,6 @@ def test_preprocessor_added_tokens_from_file(tmp_path):
         added_tokens_txt=str(tokens_file),
     )
     assert "<sc>" in prep.added_tokens
-    assert "<|1spk|>" in prep.added_tokens
 
 
 @pytest.mark.timeout(30)

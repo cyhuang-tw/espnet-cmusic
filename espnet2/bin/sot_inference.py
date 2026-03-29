@@ -6,7 +6,6 @@ Includes SOT constraint scoring and post-processing.
 
 import argparse
 import logging
-import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -216,47 +215,6 @@ class TiktokenDecoderAdapter:
         return "".join(tokens)
 
 
-def _detect_token_ids(added_tokens: List[str], token_list: List[str]):
-    """Auto-detect speaker token IDs from added_tokens.
-
-    Recognizes patterns:
-      <|Xspk|>     -> spk_count  (e.g., <|1spk|>, <|2spk|>)
-      <|Xspk_rem|> -> spk_rem    (e.g., <|1spk_rem|>, <|2spk_rem|>)
-      <|spkX|>     -> spk_id     (e.g., <|spk1|>, <|spk2|>)
-
-    Returns:
-        (spk_count_ids, spk_rem_ids, spk_id_ids) -- each a sorted list or None.
-    """
-    spk_count_ids = []
-    spk_rem_ids = []
-    spk_id_ids = []
-
-    for token in added_tokens:
-        if token not in token_list:
-            continue
-        idx = token_list.index(token)
-        if re.match(r"<\|\d+spk\|>$", token):
-            spk_count_ids.append((token, idx))
-        elif re.match(r"<\|\d+spk_rem\|>$", token):
-            spk_rem_ids.append((token, idx))
-        elif re.match(r"<\|spk\d+\|>$", token):
-            spk_id_ids.append((token, idx))
-
-    def _extract_num(t):
-        nums = re.findall(r"\d+", t)
-        return int(nums[0]) if nums else 0
-
-    spk_count_ids.sort(key=lambda x: _extract_num(x[0]))
-    spk_rem_ids.sort(key=lambda x: _extract_num(x[0]))
-    spk_id_ids.sort(key=lambda x: _extract_num(x[0]))
-
-    return (
-        [x[1] for x in spk_count_ids] or None,
-        [x[1] for x in spk_rem_ids] or None,
-        [x[1] for x in spk_id_ids] or None,
-    )
-
-
 class SOTSpeech2Text:
     """SOT Speech2Text class using native OpenAI Whisper + tiktoken.
 
@@ -283,7 +241,6 @@ class SOTSpeech2Text:
         nbest: int = 1,
         normalize_length: bool = False,
         use_sot_constraint: bool = True,
-        use_spk_tokens: bool = False,
         separator_token: Optional[str] = None,
     ):
         # Build model from SOTASRTask
@@ -319,9 +276,6 @@ class SOTSpeech2Text:
 
         # Auto-detect SOT token IDs and build constraint scorer
         self.separator_token_id = None
-        self.spk_count_token_ids = None
-        self.spk_rem_token_ids = None
-        self.spk_id_token_ids = None
 
         if use_sot_constraint:
             try:
@@ -339,42 +293,12 @@ class SOTSpeech2Text:
                     raise ValueError("No separator token found in token_list")
                 self.separator_token_id = sc_id
 
-                spk_count_ids = None
-                spk_rem_ids = None
-                spk_id_ids = None
-                if use_spk_tokens:
-                    added_tokens_file = getattr(
-                        asr_train_args, "added_tokens_file", None
-                    )
-                    preprocessor_conf = getattr(asr_train_args, "preprocessor_conf", {})
-                    atf = added_tokens_file or preprocessor_conf.get(
-                        "added_tokens_txt", None
-                    )
-                    added_tokens = ["<sc>"]
-                    if atf is not None:
-                        try:
-                            with open(atf) as f:
-                                added_tokens = [
-                                    line.strip() for line in f if line.strip()
-                                ]
-                        except FileNotFoundError:
-                            pass
-                    spk_count_ids, spk_rem_ids, spk_id_ids = _detect_token_ids(
-                        added_tokens, token_list
-                    )
-                self.spk_count_token_ids = spk_count_ids
-                self.spk_rem_token_ids = spk_rem_ids
-                self.spk_id_token_ids = spk_id_ids
-
                 sot_scorer = SOTConstraintScorer(
                     vocab_size=len(token_list),
                     eos=asr_model.eos,
                     timestamp_begin=timestamp_begin,
                     no_timestamps_token_id=no_timestamps_id,
                     sot_separator_token_id=sc_id,
-                    spk_count_token_ids=spk_count_ids,
-                    spk_rem_token_ids=spk_rem_ids,
-                    spk_id_token_ids=spk_id_ids,
                     suppress_token_ids=WHISPER_SUPPRESS_TOKENS,
                     begin_index=begin_index,
                 )
@@ -383,9 +307,8 @@ class SOTSpeech2Text:
 
                 logger.info(
                     f"SOT constraint scorer enabled: "
-                    f"timestamp_begin={timestamp_begin}, sc={sc_id}, "
-                    f"spk_count={spk_count_ids}, spk_rem={spk_rem_ids}, "
-                    f"spk_id={spk_id_ids}, begin_index={begin_index}"
+                    f"timestamp_begin={timestamp_begin}, "
+                    f"sc={sc_id}, begin_index={begin_index}"
                 )
             except (ValueError, KeyError) as e:
                 logger.warning(
@@ -497,13 +420,10 @@ class SOTSpeech2Text:
                 self.tiktoken_adapter is not None
                 and self.separator_token_id is not None
             ):
-                per_spk, raw_transcript, pred_n_spk, block_spk_ids = process_sot_output(
+                per_spk, raw_transcript = process_sot_output(
                     token_int=token_int,
                     hf_tokenizer=self.tiktoken_adapter,
                     separator_token_id=self.separator_token_id,
-                    spk_count_token_ids=self.spk_count_token_ids,
-                    spk_rem_token_ids=self.spk_rem_token_ids,
-                    spk_id_token_ids=self.spk_id_token_ids,
                 )
                 text = raw_transcript
             elif self.tiktoken_adapter is not None:
@@ -559,7 +479,6 @@ def inference(
     bpemodel: Optional[str],
     allow_variable_data_keys: bool,
     use_sot_constraint: bool = True,
-    use_spk_tokens: bool = False,
     separator_token: Optional[str] = None,
 ):
     """Run SOT inference."""
@@ -590,7 +509,6 @@ def inference(
         nbest=nbest,
         normalize_length=normalize_length,
         use_sot_constraint=use_sot_constraint,
-        use_spk_tokens=use_spk_tokens,
         separator_token=separator_token,
     )
 
@@ -681,12 +599,6 @@ def get_parser():
         type=str2bool,
         default=True,
         help="Enable SOT constraint scorer for structured decoding",
-    )
-    group.add_argument(
-        "--use_spk_tokens",
-        type=str2bool,
-        default=False,
-        help="Enable spk_count/spk_rem/spk_id token forcing in constraints",
     )
     group.add_argument(
         "--separator_token",

@@ -10,7 +10,7 @@
 #
 # Usage:
 #   # Full pipeline:
-#   ./run.sh --stage 0 --sot_strategy speaker_longest_first
+#   ./run.sh --stage 0 --use_timestamps true
 #
 #   # Train only:
 #   ./run.sh --stage 1 --stop_stage 1
@@ -41,12 +41,8 @@ valid_set=dev
 test_sets="dev test"
 
 # SOT data prep
-sot_strategy=speaker_longest_first
 use_timestamps=false
 max_timestamp_pause=2.0
-use_spk_count_tokens=false
-use_spk_rem_tokens=false
-use_spk_id_tokens=false
 train_cutset=   # path to train cutset .jsonl.gz (required for stage 0)
 valid_cutset=   # path to valid cutset .jsonl.gz (required for stage 0)
 test_cutsets=   # space-separated paths to test cutset .jsonl.gz files
@@ -90,12 +86,8 @@ fi
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     log "Stage 0: Prepare SOT data from Lhotse CutSets"
 
-    _sot_opts="--sot_strategy ${sot_strategy} \
-        --use_timestamps ${use_timestamps} \
+    _sot_opts="--use_timestamps ${use_timestamps} \
         --max_timestamp_pause ${max_timestamp_pause} \
-        --use_spk_count_tokens ${use_spk_count_tokens} \
-        --use_spk_rem_tokens ${use_spk_rem_tokens} \
-        --use_spk_id_tokens ${use_spk_id_tokens} \
         --added_tokens_file ${added_tokens_file}"
 
     if [ -n "${train_cutset}" ]; then

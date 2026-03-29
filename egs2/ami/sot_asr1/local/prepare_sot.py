@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Prepare SOT (Serialized Output Training) data from Lhotse CutSets.
 
-Reads Lhotse CutSet .jsonl.gz files, applies a speaker ordering strategy,
+Reads Lhotse CutSet .jsonl.gz files, orders speakers by start time,
 and writes Kaldi-format data directories for ESPnet2 training.
 
 Output files:
     wav.scp   — utt_id /path/to/audio.wav
-    text      — utt_id <|startoftranscript|> spk1_text <sc> spk2_text <|endoftext|>
+    text      — utt_id spk1_text <sc> spk2_text <|endoftext|>
     utt2spk   — utt_id utt_id
     spk2utt   — utt_id utt_id
 
@@ -14,7 +14,6 @@ Usage:
     python local/prepare_sot.py \
         --cutset_paths manifest1.jsonl.gz manifest2.jsonl.gz \
         --output_dir data/train \
-        --sot_strategy speaker_longest_first \
         --use_timestamps true \
         --max_timestamp_pause 2.0
 """
@@ -22,8 +21,7 @@ Usage:
 import argparse
 import logging
 import os
-from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from lhotse import CutSet
 
@@ -32,15 +30,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-SOT_STRATEGIES = [
-    "speaker_longest_first",
-    "speaker_shortest_first",
-    "speaker_start_time",
-    "speaker_loudest_first",
-    "speaker_quietest_first",
-    "utterance_start_time",
-]
 
 SPEAKER_CHANGE_TOKEN = " <sc> "
 
@@ -149,89 +138,21 @@ def merge_speaker_units(units, use_timestamps: bool):
     return items
 
 
-def sort_units(items, sot_strategy: str, energy_per_spk=None):
-    """Sort transcript items according to the SOT strategy."""
-    if sot_strategy.endswith("start_time"):
-        return sorted(items, key=lambda x: x["start"])
-    elif sot_strategy.endswith("longest_first"):
-        return sorted(items, key=lambda x: len(x["text"]), reverse=True)
-    elif sot_strategy.endswith("shortest_first"):
-        return sorted(items, key=lambda x: len(x["text"]))
-    elif sot_strategy.endswith("loudest_first"):
-        if energy_per_spk is None:
-            return items
-        return sorted(
-            items,
-            key=lambda x: energy_per_spk.get(x["speaker"], 0),
-            reverse=True,
-        )
-    elif sot_strategy.endswith("quietest_first"):
-        if energy_per_spk is None:
-            return items
-        return sorted(
-            items,
-            key=lambda x: energy_per_spk.get(x["speaker"], 0),
-        )
-    return items
-
-
 def build_sot_text(
     cut,
-    sot_strategy: str,
     use_timestamps: bool,
     max_timestamp_pause: float,
-    use_spk_count_tokens: bool,
-    use_spk_rem_tokens: bool = False,
-    use_spk_id_tokens: bool = False,
 ):
     """Build the serialized SOT text for a single cut.
 
-    Speaker token formats (mutually exclusive except spk_count can combine):
-      - spk_count: prepend <|Nspk|> once at start (total speaker count)
-      - spk_rem:   prepend <|Nspk_rem|> before each speaker (remaining count)
-      - spk_id:    prepend <|spkN|> before each item (sequential speaker ID)
+    Speakers are ordered by their earliest start time.
 
     Returns the full text string with speaker change tokens.
     """
     units = get_transcript_units(cut, use_timestamps, max_timestamp_pause)
-
-    if sot_strategy.startswith("utterance"):
-        items = units
-    elif sot_strategy.startswith("speaker"):
-        items = merge_speaker_units(units, use_timestamps)
-    else:
-        raise ValueError(f"Unknown SOT strategy: {sot_strategy}")
-
-    energy_per_spk = getattr(cut, "per_spk_energy", None)
-    items = sort_units(items, sot_strategy, energy_per_spk=energy_per_spk)
-
-    # Apply per-item speaker tokens if requested
-    if use_spk_id_tokens:
-        spk_to_id = {}
-        next_id = 1
-        parts = []
-        for item in items:
-            spk = item["speaker"]
-            if spk not in spk_to_id:
-                spk_to_id[spk] = min(next_id, 5)
-                next_id += 1
-            parts.append(f"<|spk{spk_to_id[spk]}|>" + item["text"])
-        text = SPEAKER_CHANGE_TOKEN.join(parts)
-    elif use_spk_rem_tokens:
-        parts = []
-        for i, item in enumerate(items):
-            remaining = min(len(items) - i, 5)
-            parts.append(f"<|{remaining}spk_rem|>" + item["text"])
-        text = SPEAKER_CHANGE_TOKEN.join(parts)
-    else:
-        text = SPEAKER_CHANGE_TOKEN.join(x["text"] for x in items)
-
-    # spk_count is orthogonal — prepend total speaker count at the very start
-    if use_spk_count_tokens:
-        n = min(len(get_cut_speakers(cut)), 5)
-        text = f"<|{n}spk|>" + text
-
-    return text
+    items = merge_speaker_units(units, use_timestamps)
+    items = sorted(items, key=lambda x: x["start"])
+    return SPEAKER_CHANGE_TOKEN.join(x["text"] for x in items)
 
 
 def get_audio_entry(cut, segments_dir: Optional[str] = None) -> Optional[str]:
@@ -268,12 +189,8 @@ def get_audio_entry(cut, segments_dir: Optional[str] = None) -> Optional[str]:
 
 def process_cutset(
     cutset: CutSet,
-    sot_strategy: str,
     use_timestamps: bool,
     max_timestamp_pause: float,
-    use_spk_count_tokens: bool,
-    use_spk_rem_tokens: bool = False,
-    use_spk_id_tokens: bool = False,
     segments_dir: Optional[str] = None,
 ) -> tuple:
     """Process a CutSet and return lists of (utt_id, wav_path, text).
@@ -297,8 +214,7 @@ def process_cutset(
 
         # Filter out cuts >= 30s.  Whisper timestamp tokens only cover
         # 0-30 seconds, so supervisions in longer cuts would produce
-        # out-of-vocabulary token IDs.  This matches the
-        # LhotseLongFormDataset filter in TS-ASR-Whisper.
+        # out-of-vocabulary token IDs.
         if cut.duration >= 30.0:
             stats["skipped_too_long"] += 1
             logger.debug(f"Skipping {utt_id}: duration {cut.duration:.2f}s >= 30s")
@@ -314,12 +230,8 @@ def process_cutset(
         # Build SOT text
         text = build_sot_text(
             cut,
-            sot_strategy=sot_strategy,
             use_timestamps=use_timestamps,
             max_timestamp_pause=max_timestamp_pause,
-            use_spk_count_tokens=use_spk_count_tokens,
-            use_spk_rem_tokens=use_spk_rem_tokens,
-            use_spk_id_tokens=use_spk_id_tokens,
         )
 
         if not text.strip():
@@ -329,9 +241,8 @@ def process_cutset(
 
         # Append <|endoftext|> so the model learns to generate it.
         # Do NOT prepend <|startoftranscript|> — the ESPnet preprocessor's
-        # tokens2ids adds the SOT prefix [<|en|>, <|transcribe|>, <|notimestamps|>],
-        # and the model's _shift_tokens_right adds <|startoftranscript|> as
-        # decoder_start_token_id.
+        # tokens2ids adds the SOT prefix [<|en|>, <|transcribe|>],
+        # and the model's add_sos_eos adds <|startoftranscript|> as SOS.
         full_text = f"{text} <|endoftext|>"
 
         entries.append((utt_id, audio_path, full_text))
@@ -387,13 +298,6 @@ def main():
         help="Output directory for Kaldi-format data",
     )
     parser.add_argument(
-        "--sot_strategy",
-        type=str,
-        default="speaker_longest_first",
-        choices=SOT_STRATEGIES,
-        help="SOT speaker ordering strategy",
-    )
-    parser.add_argument(
         "--use_timestamps",
         type=lambda x: x.lower() in ("true", "1", "yes"),
         default=False,
@@ -406,24 +310,6 @@ def main():
         help="Max pause (seconds) for merging adjacent segments",
     )
     parser.add_argument(
-        "--use_spk_count_tokens",
-        type=lambda x: x.lower() in ("true", "1", "yes"),
-        default=False,
-        help="Prepend speaker count token <|Nspk|> before transcript",
-    )
-    parser.add_argument(
-        "--use_spk_rem_tokens",
-        type=lambda x: x.lower() in ("true", "1", "yes"),
-        default=False,
-        help="Prepend remaining speaker count <|Nspk_rem|> before each speaker chunk",
-    )
-    parser.add_argument(
-        "--use_spk_id_tokens",
-        type=lambda x: x.lower() in ("true", "1", "yes"),
-        default=False,
-        help="Prepend speaker ID <|spkN|> before each utterance/chunk",
-    )
-    parser.add_argument(
         "--added_tokens_file",
         type=str,
         default=None,
@@ -431,19 +317,13 @@ def main():
     )
     args = parser.parse_args()
 
-    # Mutual exclusivity check (matches TS-ASR-Whisper)
-    if args.use_spk_id_tokens and args.use_spk_rem_tokens:
-        parser.error(
-            "--use_spk_id_tokens and --use_spk_rem_tokens are mutually exclusive"
-        )
-
     # Validate tokens against added_tokens_file if provided
     if args.added_tokens_file is not None:
         try:
             with open(args.added_tokens_file) as f:
                 registered_tokens = {line.strip() for line in f if line.strip()}
             logger.info(
-                f"Validating against {args.added_tokens_file}: {registered_tokens}"
+                f"Validating against {args.added_tokens_file}: " f"{registered_tokens}"
             )
             if "<sc>" not in registered_tokens:
                 logger.warning(
@@ -451,48 +331,14 @@ def main():
                     "speaker change tokens will be split "
                     "into subwords by the tokenizer"
                 )
-            if args.use_spk_count_tokens:
-                expected = {f"<|{n}spk|>" for n in range(1, 6)}
-                missing = expected - registered_tokens
-                if missing:
-                    logger.warning(
-                        f"--use_spk_count_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: "
-                        f"{sorted(missing)} — they will be split "
-                        "into subwords by the tokenizer"
-                    )
-            if args.use_spk_rem_tokens:
-                expected = {f"<|{n}spk_rem|>" for n in range(1, 6)}
-                missing = expected - registered_tokens
-                if missing:
-                    logger.warning(
-                        f"--use_spk_rem_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: "
-                        f"{sorted(missing)} — they will be split "
-                        "into subwords by the tokenizer"
-                    )
-            if args.use_spk_id_tokens:
-                expected = {f"<|spk{n}|>" for n in range(1, 6)}
-                missing = expected - registered_tokens
-                if missing:
-                    logger.warning(
-                        f"--use_spk_id_tokens is enabled but these tokens "
-                        f"are missing from {args.added_tokens_file}: "
-                        f"{sorted(missing)} — they will be split "
-                        "into subwords by the tokenizer"
-                    )
         except FileNotFoundError:
             logger.warning(
                 f"added_tokens_file not found: {args.added_tokens_file}, "
                 f"skipping validation"
             )
 
-    logger.info(f"SOT strategy: {args.sot_strategy}")
     logger.info(f"Use timestamps: {args.use_timestamps}")
     logger.info(f"Max timestamp pause: {args.max_timestamp_pause}")
-    logger.info(f"Use speaker count tokens: {args.use_spk_count_tokens}")
-    logger.info(f"Use speaker remaining tokens: {args.use_spk_rem_tokens}")
-    logger.info(f"Use speaker ID tokens: {args.use_spk_id_tokens}")
 
     # Create segments_wav directory for pre-extracted audio segments
     segments_dir = os.path.join(args.output_dir, "segments_wav")
@@ -513,12 +359,8 @@ def main():
 
         entries, stats = process_cutset(
             cutset,
-            sot_strategy=args.sot_strategy,
             use_timestamps=args.use_timestamps,
             max_timestamp_pause=args.max_timestamp_pause,
-            use_spk_count_tokens=args.use_spk_count_tokens,
-            use_spk_rem_tokens=args.use_spk_rem_tokens,
-            use_spk_id_tokens=args.use_spk_id_tokens,
             segments_dir=segments_dir,
         )
         all_entries.extend(entries)
