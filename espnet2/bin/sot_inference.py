@@ -442,10 +442,12 @@ class SOTSpeech2Text:
                 self.tiktoken_adapter is not None
                 and self.separator_token_id is not None
             ):
+                sep_str = self.token_list[self.separator_token_id]
                 per_spk, raw_transcript = process_sot_output(
                     token_int=token_int,
                     hf_tokenizer=self.tiktoken_adapter,
                     separator_token_id=self.separator_token_id,
+                    separator_str=sep_str,
                 )
                 text = raw_transcript
             elif self.tiktoken_adapter is not None:
