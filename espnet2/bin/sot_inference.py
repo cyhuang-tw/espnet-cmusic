@@ -128,9 +128,15 @@ class SOTBeamSearch(BeamSearch):
     WhisperTimeStampLogitsProcessorCustom.
     """
 
-    def __init__(self, timestamp_begin: int = 50365, **kwargs):
+    def __init__(
+        self,
+        timestamp_begin: int = 50365,
+        sot_separator_token_id: int = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.timestamp_begin = timestamp_begin
+        self.sot_separator_token_id = sot_separator_token_id
 
     def search(self, running_hyps, x, pre_x=None):
         best_hyps = []
@@ -149,7 +155,20 @@ class SOTBeamSearch(BeamSearch):
             ts_logprob = logprobs[self.timestamp_begin :].logsumexp(dim=-1)
             max_text_logprob = logprobs[: self.timestamp_begin].max()
             if ts_logprob > max_text_logprob:
+                # Save separator score before suppression (it's a text
+                # token below timestamp_begin that must be preserved)
+                sep_id = self.sot_separator_token_id
+                sep_score = (
+                    weighted_scores[sep_id].clone() if sep_id is not None else None
+                )
                 weighted_scores[: self.timestamp_begin] = float("-inf")
+                # Restore separator if constraint scorer allowed it
+                if (
+                    sep_id is not None
+                    and sep_score is not None
+                    and sep_score > float("-inf")
+                ):
+                    weighted_scores[sep_id] = sep_score
 
             # partial scoring
             if self.do_pre_beam:
@@ -321,8 +340,11 @@ class SOTSpeech2Text:
             timestamp_begin=(
                 timestamp_begin
                 if use_sot_constraint
-                else token_list.index("<|0.00|>") if "<|0.00|>" in token_list else 50365
+                else (
+                    token_list.index("<|0.00|>") if "<|0.00|>" in token_list else 50365
+                )
             ),
+            sot_separator_token_id=self.separator_token_id,
             beam_size=beam_size,
             weights=weights,
             scorers=scorers,

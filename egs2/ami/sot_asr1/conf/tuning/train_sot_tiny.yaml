@@ -2,6 +2,7 @@ encoder: whisper
 encoder_conf:
     whisper_model: tiny
     dropout_rate: 0.0
+    do_pad_trim: true
 
 decoder: whisper
 decoder_conf:

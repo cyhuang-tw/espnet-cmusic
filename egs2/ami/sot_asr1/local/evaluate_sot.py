@@ -251,6 +251,16 @@ def main():
         if not hyp_speakers:
             hyp_speakers = [""]
 
+        # Cap hypothesis speakers to avoid meeteval crash on hallucinated
+        # speaker changes (keep first N blocks where N = 2 * num_ref_speakers)
+        max_hyp_spk = max(len(ref_speakers) * 2, 5)
+        if len(hyp_speakers) > max_hyp_spk:
+            logger.warning(
+                f"{utt_id}: capping hyp speakers from "
+                f"{len(hyp_speakers)} to {max_hyp_spk}"
+            )
+            hyp_speakers = hyp_speakers[:max_hyp_spk]
+
         refs[utt_id] = ref_speakers
         hyps[utt_id] = hyp_speakers
         num_ref_speakers[utt_id] = len(ref_speakers)
