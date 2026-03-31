@@ -813,6 +813,7 @@ class Trainer:
                     reporter.tensorboard_add_scalar(summary_writer, -log_interval)
                 if use_wandb:
                     reporter.wandb_log()
+                torch.cuda.empty_cache()
 
         else:
             if distributed:

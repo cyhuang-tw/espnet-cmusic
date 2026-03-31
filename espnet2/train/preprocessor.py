@@ -585,7 +585,7 @@ class MusicPreprocessor(CommonPreprocessor):
         # only use for whisper
         whisper_language: Optional[str] = None,
         whisper_task: Optional[str] = None,
-        max_context_sec: float = 30.0,
+        max_context_sec: float = 4.0,
         sr: float = 16000,
     ):
 
@@ -673,66 +673,79 @@ class MusicPreprocessor(CommonPreprocessor):
 
             speech = data[self.speech_name]
             len_sec = len(speech) / self.sr
-            if len_sec > 30:
-                start_time = random.uniform(0, len_sec - 30)
+            if len_sec > self.max_context_sec:
+                start_time = random.uniform(0, len_sec - self.max_context_sec)
             else:
                 start_time = 0
-            end_time = start_time + 30
-
+            end_time = start_time + self.max_context_sec
+            if not self.train:
+                start_time = 0
+                end_time = min(len_sec, self.max_context_sec)
+                print("NOT TRAINING")
             speech = speech[int(start_time * self.sr) : int(end_time * self.sr)]
             data[self.speech_name] = speech
                 
         return data, start_time, end_time
 
     def _text_process(
-        self, data: Dict[str, Union[str, np.ndarray]], start_time: float, end_time: float 
+        self, data: Dict[str, Union[str, np.ndarray]], start_time: float, end_time: float,
+        use_timesteps: bool = True
     ) -> Dict[str, np.ndarray]:
-        #data[self.text_name] = np.array([0,1,2,3,4,5,6,7,8,9])
-        #return data
-        if self.text_name in data and self.tokenizer is not None:
-            text = data[self.text_name]
-            if isinstance(text, np.ndarray):
-                return data
-            text = self.text_cleaner(text)
-            tokens = self.tokenizer.text2tokens(text)
+        if self.text_name not in data or self.tokenizer is None:
+            return data
 
-            task_token = tokens[0]
-            start_index = None
-            end_index = None
+        text = data[self.text_name]
+        if isinstance(text, np.ndarray):
+            return data
 
-            tokens = tokens[1:]
-            for i, token in enumerate(tokens[::2]):
-                timestamp = float(token[1:])
-                if start_index is None and timestamp >= start_time:
-                    start_index = i
-                
-                if start_index is not None and timestamp < end_time:
-                    end_index = i
+        text = self.text_cleaner(text)
+        tokens = self.tokenizer.text2tokens(text)
+        task_token = tokens[0]
+        tokens = tokens[1:]  # [T0.94, NOTE_ON..., T0.95, NOTE_ON..., ...]
 
-                if timestamp > end_time:
-                    break
+        # --- Extract all timestamps at once using numpy ---
+        ts_tokens = tokens[::2]  # ["T0.94", "T0.95", ...]
+        timestamps = np.fromiter(
+            (float(t[1:]) for t in ts_tokens), dtype=np.float32, count=len(ts_tokens)
+        )
 
-            #print(start_time, end_time, tokens[start_index*2], tokens[end_index*2], flush=True)
-            tokens = tokens[start_index * 2 : (end_index+1) * 2]
+        # --- Vectorized index search ---
+        start_mask = timestamps >= start_time
+        end_mask   = timestamps < end_time
+        in_window  = start_mask & end_mask
+
+        if not in_window.any():
+            # No tokens fall within [start_time, end_time), return empty
+            data[self.text_name] = np.array(
+                self.token_id_converter.tokens2ids([task_token]), dtype=np.int64
+            )
+            return data
+
+        start_index = int(in_window.argmax())
+        end_index   = int(np.where(in_window)[0][-1])
+
+        # --- Slice token list ---
+        tokens = tokens[start_index * 2 : (end_index + 1) * 2]
+
+        if use_timesteps:
+            # --- Normalize timestamps without regex ---
+            sliced_ts = timestamps[start_index : end_index + 1]
+            offset = start_time
+            normalized = sliced_ts - offset
+
+            new_tokens = list(tokens)
+            for i, t in enumerate(normalized):
+                new_tokens[i * 2] = f"T{t:.2f}"
             #print(start_time, end_time)
             #print(tokens)
-            new_tokens = []
-            pattern = r'^T\d+\.\d+$'
-            start_timestamp = float(tokens[0][1:])
-            for token in tokens:
-                if bool(re.match(pattern, token)):
-                    timestamp = float(token[1:])
-                    new_time = timestamp - start_timestamp
-                    s = f"{new_time:.2f}"
-                    new_tokens.append(f"T{s}")
-                else:
-                    new_tokens.append(token)
+            #print(new_tokens, flush=True)
             tokens = [task_token] + new_tokens
-            #print(tokens, flush=True)
-            text_ints = self.token_id_converter.tokens2ids(tokens)
-            #print(text_ints, flush=True)
+        else:
+            # Keep only odd-indexed tokens (the note tokens, not the timestamps)
+            tokens = [task_token] + tokens[1::2]
 
-            data[self.text_name] = np.array(text_ints, dtype=np.int64)
+        text_ints = self.token_id_converter.tokens2ids(tokens)
+        data[self.text_name] = np.array(text_ints, dtype=np.int64)
         return data
 
     @typechecked

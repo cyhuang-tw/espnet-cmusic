@@ -76,7 +76,7 @@ class TransformerEncoder(AbsEncoder):
         dropout_rate: float = 0.1,
         positional_dropout_rate: float = 0.1,
         attention_dropout_rate: float = 0.0,
-        input_layer: Optional[str] = "conv2d",
+        input_layer: Optional[str] = None,
         pos_enc_class=PositionalEncoding,
         pos_enc_layer_type="abs_pos",
         normalize_before: bool = True,

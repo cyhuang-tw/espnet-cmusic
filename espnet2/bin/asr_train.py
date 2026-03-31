@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from espnet2.tasks.asr import ASRTask
 
 

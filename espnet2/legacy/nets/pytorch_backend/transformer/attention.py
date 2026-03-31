@@ -68,7 +68,7 @@ class MultiHeadedAttention(nn.Module):
         self.q_norm = LayerNorm(self.d_k) if qk_norm else nn.Identity()
         self.k_norm = LayerNorm(self.d_k) if qk_norm else nn.Identity()
 
-        self.use_flash_attn = use_flash_attn
+        self.use_flash_attn = True
         self.causal = causal  # only used with flash_attn
         self.cross_attn = cross_attn  # only used with flash_attn
 
