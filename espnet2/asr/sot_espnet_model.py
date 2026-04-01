@@ -137,7 +137,7 @@ class SOTWhisperModel(ESPnetASRModel):
         return upp_labels
 
     def _per_sample_min_ce(self, logits, labels, upp_labels):
-        """Per-sample mean CE with min over case variants.
+        """Min-CE over case variants, matching HF's flat-mean computation.
 
         Args:
             logits:     [N, L, V]
@@ -145,17 +145,17 @@ class SOTWhisperModel(ESPnetASRModel):
             upp_labels: [N, L]
 
         Returns:
-            scalar loss (mean over batch)
+            scalar loss
         """
-        log_probs = F.log_softmax(logits, dim=-1, dtype=torch.float32)
-        mask = labels.ne(self.ignore_id)
-        safe_lab = labels.clamp(min=0)
-        safe_upp = upp_labels.clamp(min=0)
-        nll1 = -log_probs.gather(-1, safe_lab.unsqueeze(-1)).squeeze(-1)
-        nll2 = -log_probs.gather(-1, safe_upp.unsqueeze(-1)).squeeze(-1)
-        nll = torch.min(nll1, nll2) * mask.float()
-        per_sample = nll.sum(dim=-1) / mask.sum(dim=-1).clamp(min=1)
-        return per_sample.mean()
+        loss_fct = torch.nn.CrossEntropyLoss(
+            ignore_index=self.ignore_id, reduction="none"
+        )
+        N, L, V = logits.shape
+        flat_logits = logits.reshape(-1, V)
+        nll1 = loss_fct(flat_logits, labels.reshape(-1))
+        nll2 = loss_fct(flat_logits, upp_labels.reshape(-1))
+        nll = torch.min(nll1, nll2)
+        return nll.mean()
 
     def _calc_att_loss(
         self,

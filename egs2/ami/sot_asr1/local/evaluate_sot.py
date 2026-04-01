@@ -190,7 +190,7 @@ def main():
     parser.add_argument(
         "--speaker_change_token",
         type=str,
-        default="<sc>",
+        default="????",
         help="Token used to separate speakers in SOT output",
     )
     parser.add_argument(

@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SPEAKER_CHANGE_TOKEN = " <sc> "
+SPEAKER_CHANGE_TOKEN = " ???? "
 
 
 def round_nearest(value: float, resolution: float) -> float:
@@ -325,7 +325,7 @@ def main():
             logger.info(
                 f"Validating against {args.added_tokens_file}: " f"{registered_tokens}"
             )
-            if "<sc>" not in registered_tokens:
+            if "????" not in registered_tokens and "<sc>" not in registered_tokens:
                 logger.warning(
                     f"<sc> not found in {args.added_tokens_file} — "
                     "speaker change tokens will be split "

@@ -88,13 +88,24 @@ class SOTWhisperPreprocessor(AbsPreprocessor):
         else:
             self.added_tokens = ["<sc>"]
 
-        # Map added tokens to IDs starting after the base vocabulary
+        # Map added tokens to IDs. If a token already exists in the
+        # base tiktoken vocab as a single token, reuse its existing ID.
+        # Otherwise assign a new ID after the base vocabulary.
         self.added_token_map: Dict[str, int] = {}
         base_id = self.encoding.n_vocab
-        for i, token in enumerate(self.added_tokens):
-            self.added_token_map[token] = base_id + i
+        n_new = 0
+        for token in self.added_tokens:
+            try:
+                existing_ids = self.encoding.encode(token, allowed_special="all")
+                if len(existing_ids) == 1:
+                    self.added_token_map[token] = existing_ids[0]
+                    continue
+            except Exception:
+                pass
+            self.added_token_map[token] = base_id + n_new
+            n_new += 1
 
-        self.vocab_size = base_id + len(self.added_tokens)
+        self.vocab_size = base_id + n_new
 
         # Regex for parsing: timestamp tokens, added tokens, or text
         # Matches <|...|> patterns and added tokens like <sc>
