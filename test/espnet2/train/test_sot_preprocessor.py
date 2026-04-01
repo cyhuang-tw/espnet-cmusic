@@ -75,3 +75,23 @@ def test_preprocessor_output_deterministic(preprocessor):
     out1 = preprocessor("utt1", data1)
     out2 = preprocessor("utt1", data2)
     assert np.array_equal(out1["text"], out2["text"])
+
+
+@pytest.mark.timeout(30)
+def test_preprocessor_existing_bpe_token(tmp_path):
+    """Test that ???? maps to its existing BPE ID (25629), not a new token."""
+    tokens_file = tmp_path / "tokens.txt"
+    tokens_file.write_text("????\n")
+    prep = SOTWhisperPreprocessor(
+        train=True,
+        whisper_language="en",
+        whisper_task="transcribe",
+        added_tokens_txt=str(tokens_file),
+    )
+    assert "????" in prep.added_tokens
+    assert prep.added_token_map["????"] == 25629
+    assert prep.vocab_size == prep.encoding.n_vocab  # no expansion
+
+    data = {"text": "<|0.00|> hello<|1.00|> ???? <|0.50|> world<|1.50|> <|endoftext|>"}
+    out = prep("utt1", data)
+    assert 25629 in out["text"].tolist()

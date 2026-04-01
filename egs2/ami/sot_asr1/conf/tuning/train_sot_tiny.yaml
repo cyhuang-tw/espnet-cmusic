@@ -28,9 +28,10 @@ preprocessor_conf:
     added_tokens_txt: local/added_tokens.txt
 
 max_epoch: 2
-optim: adam
+optim: adamw
 optim_conf:
     lr: 0.000005
+    weight_decay: 0.01
 
 scheduler: warmuplr
 scheduler_conf:

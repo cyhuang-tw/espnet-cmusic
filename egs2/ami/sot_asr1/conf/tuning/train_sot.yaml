@@ -29,9 +29,10 @@ preprocessor_conf:
     whisper_model: large-v3-turbo
 
 max_epoch: 40
-optim: adam
+optim: adamw
 optim_conf:
     lr: 0.00005
+    weight_decay: 0.01
 
 scheduler: warmuplr
 scheduler_conf:

@@ -225,8 +225,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
         ${python} local/evaluate_sot.py \
             --hyp_text "${_hyp_text}" \
             --ref_text "${_ref_text}" \
-            --output_dir "${_eval_dir}" \
-            --speaker_change_token "<sc>"
+            --output_dir "${_eval_dir}"
 
         log "Evaluation results for ${dset}: ${_eval_dir}/cpwer.json"
         if [ -f "${_eval_dir}/cpwer.json" ]; then
