@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Set bash to 'debug' mode, it will exit on :
-# -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
+# Train with positional encoding added to encoder (input_layer: linear)
 set -e
 set -u
 set -o pipefail
@@ -9,21 +8,17 @@ train_set="maestro_train_onsets"
 valid_set="maestro_dev_onsets"
 test_sets="maestro_dev_onsets"
 
-asr_config=conf/tuning/train_asr_transformer_linear_4_nonorm_righttime_large_xxxl.yaml
+asr_config=conf/tuning/train_asr_transformer_linear_4_nonorm_righttime_large_xxl_posenc.yaml
 lm_config=conf/tuning/train_lm_transformer2.yaml
 inference_config=conf/decode_asr.yaml
 
 ./asr.sh \
     --lang en \
-    --ngpu 4 \
+    --ngpu 1 \
     --token_type word \
     --use_lm false \
-    --hf_repo espnet/cmusic_dev \
     --stage 11 \
     --stop_stage 11 \
-    --skip_packing false \
-    --skip_upload_hf false \
-    --inference_asr_model 51epoch.pth \
     --max_wav_duration 9000 \
     --feats_normalize utt_mvn \
     --nj 1 \

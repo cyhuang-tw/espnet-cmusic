@@ -677,15 +677,26 @@ class MusicPreprocessor(CommonPreprocessor):
                 start_time = random.uniform(0, len_sec - self.max_context_sec)
             else:
                 start_time = 0
-            end_time = start_time + self.max_context_sec
             if not self.train:
                 start_time = 0
                 end_time = min(len_sec, self.max_context_sec)
                 print("NOT TRAINING")
-            speech = speech[int(start_time * self.sr) : int(end_time * self.sr)]
+
+            # Compute sample-aligned start/end so that the actual audio chunk
+            # boundaries match the timestamps we pass to _text_process.
+            # Using int() truncation on both sides and then converting back
+            # ensures the offset used for timestamp normalization is exact.
+            start_sample = int(start_time * self.sr)
+            end_sample = int((start_time + self.max_context_sec) * self.sr) if self.train else int(end_time * self.sr)
+
+            speech = speech[start_sample:end_sample]
             data[self.speech_name] = speech
-                
-        return data, start_time, end_time
+
+            # Recompute times from sample boundaries to avoid truncation mismatch
+            actual_start_time = start_sample / self.sr
+            actual_end_time = end_sample / self.sr
+
+        return data, actual_start_time, actual_end_time
 
     def _text_process(
         self, data: Dict[str, Union[str, np.ndarray]], start_time: float, end_time: float,
@@ -728,17 +739,13 @@ class MusicPreprocessor(CommonPreprocessor):
         tokens = tokens[start_index * 2 : (end_index + 1) * 2]
 
         if use_timesteps:
-            # --- Normalize timestamps without regex ---
+            # --- Normalize timestamps relative to the sample-aligned start ---
             sliced_ts = timestamps[start_index : end_index + 1]
-            offset = start_time
-            normalized = sliced_ts - offset
+            normalized = sliced_ts - start_time
 
             new_tokens = list(tokens)
             for i, t in enumerate(normalized):
                 new_tokens[i * 2] = f"T{t:.2f}"
-            #print(start_time, end_time)
-            #print(tokens)
-            #print(new_tokens, flush=True)
             tokens = [task_token] + new_tokens
         else:
             # Keep only odd-indexed tokens (the note tokens, not the timestamps)
