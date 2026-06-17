@@ -138,7 +138,14 @@ def load_checkpoint(model, checkpoint_path):
     """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     state_dict = checkpoint["module"]
-    model.load_state_dict(state_dict, strict=True)
+    # strict=False: for TTS (text_to_audio) we drop continuous_audio from the config,
+    # so the model lacks the unused continuous_audio.audio_tower.* keys the checkpoint
+    # stores. Prior validation showed MISSING=0 (all model params covered) -> safe.
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing:
+        raise RuntimeError(
+            f"Checkpoint is missing {len(missing)} model params: {missing[:10]}"
+        )
     return model
 
 
@@ -218,7 +225,7 @@ def inference_worker(
             if modality == "audio":
                 audio, length, sample_rate = content
                 audio, length = audio[0], length[0]
-                audio = audio.cpu().numpy()
+                audio = audio.cpu().float().numpy()  # bf16 -> float32 (numpy lacks bf16)
 
                 content = output_dir / f"{example_id}_segment{idx+1}.wav"
                 sf.write(content, audio.T, sample_rate)

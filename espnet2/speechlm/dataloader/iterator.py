@@ -272,7 +272,13 @@ class DataIteratorFactory:
                 f"steps {global_step} to {end_step - 1})"
             )
 
-        # Create DataLoader with batch_sampler
+        # Create DataLoader with batch_sampler.
+        # NOTE: use the "spawn" start method for workers. The default "fork"
+        # context deadlocks here because the DataLoader is created AFTER CUDA is
+        # initialized (model already on GPU); forking a process that holds CUDA /
+        # library threads leaves inherited locks held by dead threads, so every
+        # worker hangs in futex_wait_queue with no progress. "spawn" starts clean
+        # worker processes and avoids this. (num_workers=0 also avoids it.)
         dataloader = DataLoader(
             self.dataset,
             batch_sampler=batch_subset,
@@ -281,6 +287,7 @@ class DataIteratorFactory:
             prefetch_factor=10 if self.num_workers > 0 else None,
             pin_memory=True,
             persistent_workers=True if self.num_workers > 0 else False,
+            multiprocessing_context="spawn" if self.num_workers > 0 else None,
         )
 
         # Save batch_subset state if enabled

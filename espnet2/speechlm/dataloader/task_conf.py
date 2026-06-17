@@ -25,6 +25,12 @@ TASK_CONFIGS = {
     "dialogue": {
         "required_entries": ["dialogue"],
     },
+    "speech_enhancement": {
+        "required_entries": ["audio1", "audio2"],
+    },
+    "speech_enhancement_captioned": {
+        "required_entries": ["audio1", "text1", "audio2"],
+    },
 }
 
 

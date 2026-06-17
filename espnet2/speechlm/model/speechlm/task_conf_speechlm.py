@@ -16,6 +16,12 @@ SPEECHLM_TASK_CONFIGS = {
     "text_to_audio": [("user", "text1"), ("assistant", "audio1")],
     "audio_to_text": [("user", "audio1"), ("assistant", "text1")],
     "text_only": [("assistant", "text1")],
+    # Speech enhancement: noisy audio in (user -> audio_input encoder),
+    # clean audio out (assistant -> audio_output codec). Generative SE.
+    "speech_enhancement": [("user", "audio1"), ("assistant", "audio2")],
+    # Caption-conditioned SE: noisy audio + text caption (of the noisy audio) in,
+    # clean audio out. Caption generated offline by pretrained Bagpiper (vLLM fork).
+    "speech_enhancement_captioned": [("user", "audio1"), ("user", "text1"), ("assistant", "audio2")],
 }
 
 

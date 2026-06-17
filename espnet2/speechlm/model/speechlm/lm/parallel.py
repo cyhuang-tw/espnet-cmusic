@@ -303,6 +303,10 @@ def build_parallel_hf_class(model_hf_tag):
                 )
                 for feat, (bidx, start, length) in zip(io_feats, io_indices):
                     feat = self.adaptor[io_name](feat)
+                    import os as _os
+
+                    if _os.environ.get("ZERO_AUDIO") == "1":
+                        feat = feat * 0.0  # DEBUG: ablate audio to test conditioning
                     # NOTE(Jinchuan): Force the length to match
                     input_embeds[bidx, start : start + length] = feat
             
@@ -445,7 +449,7 @@ def build_parallel_hf_class(model_hf_tag):
                 decoded_sequences, cache = self.inference_segment(
                     inference_config,
                     cache=cache,
-                    enforce_modality=None,
+                    enforce_modality=inference_config.get("enforce_modality", None),
                     **kwargs,
                 )
 
@@ -542,6 +546,12 @@ def build_parallel_hf_class(model_hf_tag):
                     logits, cfg_logits = logits.chunk(2)
                     logits = logits * cfg + cfg_logits * (1 - cfg)
                     logits.masked_fill_(modality_mask, float("-inf"))
+
+                # (4.1b) Enforce min_step: forbid eos/eot before min_step so the
+                # generated audio is long enough for the codec decoder (kernel >= 7).
+                if step < this_config.get("min_step", 0):
+                    logits[..., self.eot_token_id] = float("-inf")
+                    logits[..., self.eos_token_id] = float("-inf")
 
                 # (4.2) token prediction based on logits
                 prev_token = self._logits_to_token(

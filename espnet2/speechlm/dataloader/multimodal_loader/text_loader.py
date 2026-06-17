@@ -14,16 +14,12 @@ import pyarrow as pa
 try:
     from arkive.text.write_utils import _decompress_text_data
 except ImportError:
-    raise ImportError(
-        "arkive is not installed. Install at https://github.com/wanchichen/arkive"
-    )
+    _decompress_text_data = None  # lazy: only ArkiveTextReader (parquet path) needs it
 
 try:
     import duckdb
 except ImportError:
-    raise ImportError(
-        "duckdb is not installed. Please install it with: pip install duckdb"
-    )
+    duckdb = None  # lazy: only ArkiveTextReader (parquet path) needs duckdb
 
 
 class ArkiveTextReader:

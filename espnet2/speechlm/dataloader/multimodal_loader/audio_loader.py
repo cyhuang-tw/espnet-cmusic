@@ -18,16 +18,12 @@ except ImportError:
 try:
     from arkive import audio_read
 except ImportError:
-    raise ImportError(
-        "arkive is not installed. Install at https://github.com/wanchichen/arkive"
-    )
+    audio_read = None  # lazy: only ArkiveAudioReader (parquet path) needs it
 
 try:
     import duckdb
 except ImportError:
-    raise ImportError(
-        "duckdb is not installed. Please install it with: pip install duckdb"
-    )
+    duckdb = None  # lazy: only ArkiveAudioReader (parquet path) needs duckdb
 
 try:
     from lhotse import CutSet, RecordingSet

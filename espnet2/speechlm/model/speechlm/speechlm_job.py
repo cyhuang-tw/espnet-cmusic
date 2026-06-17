@@ -4,6 +4,7 @@
 
 """SpeechLM job template implementation for multimodal language modeling."""
 
+import logging
 import re
 from typing import Any, Callable, Dict
 import random
@@ -143,6 +144,36 @@ class SpeechLMJobTemplate(AbsJobTemplate):
             vocab_intervals=self.vocab_intervals,
             **model_config["model_conf"],
         )
+
+        # Optional LoRA: inject low-rank adapters into the LM BACKBONE only
+        # (model.model = the Qwen3 transformer; NOT the frozen audio encoder),
+        # freeze the base, and keep only LoRA params + the configured
+        # extra_trainable heads (adaptor / stream_emb / lm_head) trainable.
+        # merge_weights MUST be False so that eval()/save never folds B*A into
+        # the base weight (the trainer saves right after a validation eval).
+        lora_conf = model_config.get("lora")
+        if lora_conf:
+            import loralib
+            from espnet2.layers.create_adapter_fn import create_lora_adapter
+
+            lora_conf = dict(lora_conf)
+            extra = lora_conf.pop("extra_trainable", [])
+            lora_conf.setdefault("merge_weights", False)
+            create_lora_adapter(model.model, **lora_conf)  # backbone only
+            loralib.mark_only_lora_as_trainable(model)
+            for name, p in model.named_parameters():
+                if any(name.startswith(e) for e in extra):
+                    p.requires_grad = True
+            n_tr = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            n_tot = sum(p.numel() for p in model.parameters())
+            model.train()  # create_lora_adapter ends in eval(); restore train
+            logging.info(
+                f"[LoRA] backbone adapters injected (rank={lora_conf.get('rank')}, "
+                f"alpha={lora_conf.get('alpha')}, merge_weights="
+                f"{lora_conf.get('merge_weights')}); extra_trainable={extra}; "
+                f"trainable {n_tr/1e9:.3f}B / {n_tot/1e9:.3f}B "
+                f"({100*n_tr/n_tot:.1f}%)"
+            )
 
         if model_config.get("activation_checkpointing", False):
             model.gradient_checkpointing_enable()
@@ -448,7 +479,22 @@ class SpeechLMPreprocessor:
                     "during inference, input dialogue should not contain "
                     "model output (assistant message)"
                 )
-            return data_dict["dialogue"]
+            # Map dialogue modality ("audio"/"text") to the model's IO names,
+            # mirroring the task-template path (audio -> audio_input/output by role).
+            mapped = []
+            for role, modality, content in data_dict["dialogue"]:
+                if modality == "audio":
+                    this_io = (
+                        self.audio_input
+                        if role in ("user", "system")
+                        else self.audio_output
+                    )
+                elif modality == "text":
+                    this_io = "text"
+                else:
+                    raise ValueError(f"Unsupported dialogue modality: {modality}")
+                mapped.append((role, this_io, content))
+            return mapped
         else:
             task_config = SPEECHLM_TASK_CONFIGS[task]
             messages = list()

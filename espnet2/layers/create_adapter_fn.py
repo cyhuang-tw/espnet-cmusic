@@ -90,6 +90,7 @@ def create_lora_adapter(
     dropout_rate: float = 0.0,
     target_modules: List[str] = ["query"],
     bias_type: Optional[str] = "none",
+    merge_weights: bool = True,
 ):
     """Create LoRA adapter for the base model.
 
@@ -134,7 +135,7 @@ def create_lora_adapter(
         parent_module, target_name, target_module = get_submodules(model, key)
         if not isinstance(target_module, lora.LoRALayer):
             new_module = create_new_lora_module(
-                target_module, rank, alpha, dropout_rate
+                target_module, rank, alpha, dropout_rate, merge_weights
             )
             replace_module(parent_module, target_name, target_module, new_module)
         else:
@@ -222,7 +223,11 @@ def create_new_houlsby_module(target_module: torch.nn.Module, bottleneck: int):
 
 @typechecked
 def create_new_lora_module(
-    target_module: torch.nn.Module, rank: int, alpha: int, dropout_rate: float
+    target_module: torch.nn.Module,
+    rank: int,
+    alpha: int,
+    dropout_rate: float,
+    merge_weights: bool = True,
 ):
     """Create a new lora module for the given target module."""
     bias = hasattr(target_module, "bias") and target_module.bias is not None
@@ -233,6 +238,7 @@ def create_new_lora_module(
             target_module.embedding_dim,
             r=rank,
             lora_alpha=alpha,
+            merge_weights=merge_weights,
         )
     elif isinstance(target_module, torch.nn.Linear):
         new_module = lora.Linear(
@@ -242,6 +248,7 @@ def create_new_lora_module(
             r=rank,
             lora_alpha=alpha,
             lora_dropout=dropout_rate,
+            merge_weights=merge_weights,
         )
     else:
         raise ValueError(

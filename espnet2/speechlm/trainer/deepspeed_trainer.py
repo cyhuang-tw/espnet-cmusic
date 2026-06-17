@@ -115,9 +115,22 @@ class DeepSpeedTrainer:
         # Step 2: Check latest checkpoint in output_dir
         elif (self.output_dir / "checkpoints").exists():
             ckpt_dir = self.output_dir / "checkpoints"
+            # Only consider COMPLETE checkpoints: DeepSpeed writes the inner
+            # "latest" tag file at the end of a successful save, so a dir
+            # without it is a partial save (e.g. job killed mid-save) and
+            # resuming from it would crash.
             checkpoints = [
-                d for d in ckpt_dir.iterdir() if d.is_dir() and "step_" in d.name
+                d
+                for d in ckpt_dir.iterdir()
+                if d.is_dir() and "step_" in d.name and (d / "latest").exists()
             ]
+            partial = [
+                d
+                for d in ckpt_dir.iterdir()
+                if d.is_dir() and "step_" in d.name and not (d / "latest").exists()
+            ]
+            for d in partial:
+                logger.warning(f"Skipping INCOMPLETE checkpoint (no 'latest'): {d}")
             if checkpoints:
                 # Sort by step number and get latest
                 checkpoint_path = sorted(
@@ -128,18 +141,69 @@ class DeepSpeedTrainer:
 
         # Load from Deepspeed checkpoint for both weights and optimizer states
         if checkpoint_path and checkpoint_path.is_dir():
-            _, client_state = self.model_engine.load_checkpoint(str(checkpoint_path))
-            if client_state and "global_step" in client_state:
-                self.global_step = client_state["global_step"]
-            logger.info(
-                f"Loaded checkpoint: {checkpoint_path} | step={self.global_step}"
-            )
+            # Detect checkpoint TYPE by the universal marker file, and align the
+            # engine flag to it. This lets a single config (load_universal=true)
+            # both (a) bootstrap from the universal checkpoint dir on first launch
+            # AND (b) auto-resume from normal ZeRO checkpoints saved during the
+            # run (output_dir/checkpoints/step_N, which have no latest_universal).
+            is_universal = (checkpoint_path / "latest_universal").exists()
+            try:
+                self.model_engine._config.load_universal_checkpoint = is_universal
+            except Exception:
+                pass
+            if is_universal:
+                # Universal checkpoint: restore the pretrained Adam optimizer
+                # states (m/v) for the CURRENT (trainable) params, matched by
+                # name from <load_dir>/<tag from latest_universal>/zero/.
+                # load_module_strict=False: only a subset of params is trainable,
+                # and the frozen continuous_audio encoder comes fresh from HF.
+                # Fresh LR schedule + global_step=0: this is a new-task fine-tune,
+                # not a continuation, so we keep our own warmup/cosine schedule.
+                self.model_engine.load_checkpoint(
+                    str(checkpoint_path),
+                    load_module_strict=False,
+                    load_optimizer_states=True,
+                    load_lr_scheduler_states=False,
+                )
+                self.global_step = 0
+                logger.info(
+                    "Loaded UNIVERSAL checkpoint (weights + pretrained optimizer "
+                    f"states) from: {checkpoint_path} | global_step reset to 0"
+                )
+            else:
+                _, client_state = self.model_engine.load_checkpoint(
+                    str(checkpoint_path)
+                )
+                if client_state and "global_step" in client_state:
+                    self.global_step = client_state["global_step"]
+                logger.info(
+                    f"Loaded checkpoint: {checkpoint_path} | step={self.global_step}"
+                )
         # Load from Pytorch checkpoint (ONLY weights, no optimizer states).
         # TODO(Jinchuan): support partial loading of some specific modules
         elif checkpoint_path and checkpoint_path.is_file():
             checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")['module']
-            self.model_engine.module.load_state_dict(checkpoint_dict)
-            logger.info(f"Loaded checkpoint weights from: {checkpoint_path}")
+            # strict=False: the pretrain checkpoint excludes the frozen
+            # continuous_audio encoder (loaded fresh from HF), so those keys are
+            # legitimately missing. Log to confirm ONLY continuous_audio is missing
+            # and nothing unexpected is dropped.
+            incompat = self.model_engine.module.load_state_dict(
+                checkpoint_dict, strict=False
+            )
+            missing = list(incompat.missing_keys)
+            unexpected = list(incompat.unexpected_keys)
+            non_cont_missing = [
+                k for k in missing if not k.startswith("multimodal_io_dict.continuous_audio")
+            ]
+            logger.info(
+                f"Loaded checkpoint weights from: {checkpoint_path} | "
+                f"missing={len(missing)} (non-continuous_audio={len(non_cont_missing)}) "
+                f"unexpected={len(unexpected)}"
+            )
+            if non_cont_missing:
+                logger.warning(f"Unexpected missing keys (non continuous_audio): {non_cont_missing[:20]}")
+            if unexpected:
+                logger.warning(f"Unexpected keys in checkpoint: {unexpected[:20]}")
         else:
             logger.info("No checkpoint found, starting from step 0")
 
@@ -254,6 +318,10 @@ class DeepSpeedTrainer:
                 for key, value in all_stats.items()
             }
             wandb.log(all_stats, step=self.global_step)
+            # Also log to the text logger: wandb may be disabled, and validation
+            # results must be visible in the log file regardless.
+            if torch.distributed.get_rank() == 0:
+                logger.info(f"validation @step {self.global_step}: {all_stats}")
 
     def train_dtype(self, ds_config):
         # Check if bf16 is enabled

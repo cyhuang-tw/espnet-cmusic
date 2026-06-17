@@ -514,9 +514,18 @@ class DiscreteAudioIO(AbsIO):
         # Remove vocabulary offsets to get original token indices
         for stream_idx in range(self.codec_n_streams):
             global_stream_idx = self.ssl_n_streams + stream_idx
-            offset_start, _ = self._stream_intervals[global_stream_idx]
+            offset_start, offset_end = self._stream_intervals[global_stream_idx]
 
             codec_codes[..., stream_idx] -= offset_start + 1
+            # Clamp to this stream's codebook range. At inference the LM can
+            # rarely emit a token outside the stream's vocab interval (special
+            # tokens or cross-stream ids, especially near segment ends with
+            # delay interleave); out-of-range ids index past the codec
+            # embedding table -> CUDA device-side assert. Training never calls
+            # decode, so this is inference-only robustness.
+            codec_codes[..., stream_idx] = codec_codes[..., stream_idx].clamp(
+                0, offset_end - offset_start - 2
+            )
 
         # Decode codec tokens to audio
         audio, audio_lengths = self._codec_decode_batch(codec_codes, lengths)
@@ -901,6 +910,80 @@ class ContinuousAudioIO(AbsIO):
                 torch_dtype=self.dtype,
             )
 
+            # FIX (arm / no flash-attn): Qwen3-Omni's audio encoder windows its
+            # self-attention via ``cu_seqlens``, which ONLY flash-attention consumes
+            # (the call site is annotated "pass cu seq lens for FA2"). Under sdpa or
+            # eager those args are silently ignored, so the encoder attends across
+            # window boundaries (full attention). The model was trained with
+            # flash_attention_3 (windowed), so this yields out-of-distribution audio
+            # features and degenerate text ("TheThe"). Rebuild the intended
+            # block-diagonal window mask from cu_seqlens and run sdpa with it; this is
+            # numerically equivalent to flash varlen attention.
+            if self.encoder_hf_model_tag == "Qwen/Qwen3-Omni-30B-A3B-Instruct" and (
+                self.attn_implementation
+                not in ("flash_attention_2", "flash_attention_3")
+            ):
+                import torch.nn.functional as F
+                from transformers.models.qwen3_omni_moe import (
+                    modeling_qwen3_omni_moe as _q3o,
+                )
+
+                _AudioAttn = _q3o.Qwen3OmniMoeAudioAttention
+                if not getattr(_AudioAttn, "_winmask_patched", False):
+
+                    def _windowed_sdpa_forward(
+                        self,
+                        hidden_states,
+                        cu_seqlens=None,
+                        attention_mask=None,
+                        **kwargs,
+                    ):
+                        seq_len, _ = hidden_states.size()
+                        q = (
+                            self.q_proj(hidden_states)
+                            .reshape(seq_len, self.num_heads, -1)
+                            .transpose(0, 1)
+                            .unsqueeze(0)
+                        )
+                        k = (
+                            self.k_proj(hidden_states)
+                            .reshape(seq_len, self.num_heads, -1)
+                            .transpose(0, 1)
+                            .unsqueeze(0)
+                        )
+                        v = (
+                            self.v_proj(hidden_states)
+                            .reshape(seq_len, self.num_heads, -1)
+                            .transpose(0, 1)
+                            .unsqueeze(0)
+                        )
+                        # Block-diagonal mask: position attends only within its window.
+                        mask = None
+                        if cu_seqlens is not None:
+                            cs = cu_seqlens.to(torch.long)
+                            block = torch.zeros(
+                                seq_len, dtype=torch.long, device=hidden_states.device
+                            )
+                            if cs.numel() > 2:
+                                block[cs[1:-1]] = 1
+                            block = block.cumsum(0)
+                            mask = (block[None, :] == block[:, None]).view(
+                                1, 1, seq_len, seq_len
+                            )
+                        out = F.scaled_dot_product_attention(
+                            q, k, v, attn_mask=mask, scale=self.scaling
+                        )
+                        out = (
+                            out.squeeze(0)
+                            .transpose(0, 1)
+                            .reshape(seq_len, -1)
+                            .contiguous()
+                        )
+                        return self.out_proj(out)
+
+                    _AudioAttn.forward = _windowed_sdpa_forward
+                    _AudioAttn._winmask_patched = True
+
             # Remove unnecessary components, keep only audio tower
             del full_model.thinker.model  # Remove language model
             del full_model.thinker.visual  # Remove vision components
@@ -954,9 +1037,6 @@ class ContinuousAudioIO(AbsIO):
                 "please check num_channels and num_samples"
             )
 
-        if wav.shape[1] > self.n_samples:
-            wav = wav[:, : self.n_samples]
-
         # Convert multi-channel to single-channel by taking the first channel
         wav = wav[0]
 
@@ -966,12 +1046,24 @@ class ContinuousAudioIO(AbsIO):
                 torch.from_numpy(wav), fs, self.sample_rate
             ).numpy()
 
+        # Truncate AFTER resampling: n_samples is defined at the processor's
+        # rate (30s x 16kHz = 480k). Truncating before resampling cut high-rate
+        # clips far too early (e.g. 10s at 48kHz), feeding a clipped input while
+        # the training target stayed full-length.
+        if wav.shape[0] > self.n_samples:
+            wav = wav[: self.n_samples]
+
         # Extract mel-spectrogram features using processor
         output = self.processor(
             [wav],
             truncation=False,
             return_tensors="np",
-            do_normalize=True,
+            # do_normalize MUST be False: the frozen Qwen3-Omni audio encoder starts
+            # with conv layers (no input LayerNorm), so do_normalize=True's +0.666
+            # log-mel offset propagates and shifts the encoder output ~46% (measured),
+            # i.e. feeds out-of-distribution features -> degenerate "TheThe" captions.
+            # The working vLLM fork uses the WhisperFeatureExtractor default (False).
+            do_normalize=False,
             max_length=wav.shape[0],
             return_token_stamps=True,
             return_attention_mask=True,
