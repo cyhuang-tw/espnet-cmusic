@@ -1,0 +1,14 @@
+# Local launcher config (per-machine paths) — never commit.
+launchers/env.sh
+
+# Heavy artifacts produced by the pipeline — never commit (regenerate via the recipe).
+data/
+exp/
+ckpt/
+enhanced/
+eval/scores/
+eval/refs/
+eval/aligned/
+*.log
+__pycache__/
+*.pyc

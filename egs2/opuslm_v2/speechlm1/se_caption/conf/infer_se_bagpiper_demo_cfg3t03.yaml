@@ -1,0 +1,11 @@
+# SE demo decoding variant: TTS-proven params (cfg 3, temp 0.8) to test whether
+# the near-silent generations at cfg1/temp0.3 are a decoding-parameter issue.
+dtype: bfloat16
+num_hypo: 1
+enforce_modality: audio
+audio:
+  temperature: 0.3
+  topk: 20
+  cfg: 3
+  max_step: 600
+  min_step: 50
